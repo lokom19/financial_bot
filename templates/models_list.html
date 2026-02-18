@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Модели прогнозирования</title>
+    <link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+    <div class="header">
+        <div class="header-title">
+            <h1>Модели прогнозирования</h1>
+            <span id="time-info">Последнее обновление: ...</span>
+        </div>
+    </div>
+
+    <div class="models-container">
+        {% if models_info %}
+            {% for model in models_info %}
+                <div class="model-card">
+                    <div class="model-header">
+                        <h2>{{ model.name }}</h2>
+                        <span class="file-count">{{ model.total_files }} файлов</span>
+                    </div>
+                    <div class="model-stats">
+                        <div class="stat-item buy">
+                            <span class="stat-label">BUY</span>
+                            <span class="stat-value">{{ model.signals.BUY }}</span>
+                        </div>
+                        <div class="stat-item sell">
+                            <span class="stat-label">SELL</span>
+                            <span class="stat-value">{{ model.signals.SELL }}</span>
+                        </div>
+                        <div class="stat-item hold">
+                            <span class="stat-label">HOLD</span>
+                            <span class="stat-value">{{ model.signals.HOLD }}</span>
+                        </div>
+                        <div class="stat-item neutral">
+                            <span class="stat-label">NEUTRAL</span>
+                            <span class="stat-value">{{ model.signals.NEUTRAL }}</span>
+                        </div>
+                    </div>
+                    <div class="model-footer">
+                        <a href="/model/{{ model.name }}" class="model-link">Просмотреть результаты</a>
+                    </div>
+                </div>
+            {% endfor %}
+        {% else %}
+            <div class="empty-message">
+                <h2>Нет доступных моделей</h2>
+                <p>Создайте директории моделей в папке "models" и добавьте в них файлы результатов.</p>
+                <a href="/create-sample-data" class="action-button">Создать пример структуры</a>
+            </div>
+        {% endif %}
+    </div>
+
+    <script>
+        // Функция для обновления текущего времени
+        function updateTime() {
+            const now = new Date();
+            const options = {
+                year: 'numeric',
+                month: 'long',
+                day: 'numeric',
+                hour: '2-digit',
+                minute: '2-digit',
+                second: '2-digit'
+            };
+            const timeString = now.toLocaleString(undefined, options);
+            const timeInfo = document.getElementById('time-info');
+            if (timeInfo) {
+                timeInfo.textContent = `Последнее обновление: ${timeString}`;
+            }
+        }
+
+        // Инициализация страницы
+        window.onload = function() {
+            updateTime();
+        };
+    </script>
+</body>
+</html>

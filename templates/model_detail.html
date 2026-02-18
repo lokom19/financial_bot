@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{ model_name }} - Модели прогнозирования</title>
+    <link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+    <div class="header">
+        <div class="header-title">
+            <h1>
+                <a href="/" class="back-link">← </a>
+                Модель: {{ model_name }}
+            </h1>
+            <span id="time-info">Последнее обновление: ...</span>
+        </div>
+
+        <div class="sorting-controls">
+            <div class="sorting-option {% if current_sort == 'accuracy' %}active{% endif %}" data-sort="accuracy">
+                <span>По точности</span>
+                <span class="sort-arrow {% if current_sort == 'accuracy' %}{{ current_order }}{% endif %}"></span>
+            </div>
+            <div class="sorting-option {% if current_sort == 'signal' %}active{% endif %}" data-sort="signal">
+                <span>По сигналу</span>
+                <span class="sort-arrow {% if current_sort == 'signal' %}{{ current_order }}{% endif %}"></span>
+            </div>
+            <div class="sorting-option {% if current_sort == 'ticker' %}active{% endif %}" data-sort="ticker">
+                <span>По тикеру</span>
+                <span class="sort-arrow {% if current_sort == 'ticker' %}{{ current_order }}{% endif %}"></span>
+            </div>
+            <div class="sorting-option {% if current_sort == 'date' %}active{% endif %}" data-sort="date">
+                <span>По дате</span>
+                <span class="sort-arrow {% if current_sort == 'date' %}{{ current_order }}{% endif %}"></span>
+            </div>
+            <div class="sorting-option {% if current_sort == 'expected_change' %}active{% endif %}" data-sort="expected_change">
+                <span>По изменению</span>
+                <span class="sort-arrow {% if current_sort == 'expected_change' %}{{ current_order }}{% endif %}"></span>
+            </div>
+            <div class="sorting-option {% if current_sort == 'r_squared' %}active{% endif %}" data-sort="r_squared">
+                <span>По R²</span>
+                <span class="sort-arrow {% if current_sort == 'r_squared' %}{{ current_order }}{% endif %}"></span>
+            </div>
+        </div>
+
+        <div class="filter-controls">
+            <a href="/model/{{ model_name }}" class="filter-button all {% if not current_signal %}active{% endif %}">
+                Все ({{ signal_stats.BUY + signal_stats.SELL + signal_stats.HOLD + signal_stats.NEUTRAL }})
+            </a>
+            <a href="/model/{{ model_name }}?signal=buy" class="filter-button buy {% if current_signal == 'buy' %}active{% endif %}">
+                BUY ({{ signal_stats.BUY }})
+            </a>
+            <a href="/model/{{ model_name }}?signal=sell" class="filter-button sell {% if current_signal == 'sell' %}active{% endif %}">
+                SELL ({{ signal_stats.SELL }})
+            </a>
+            <a href="/model/{{ model_name }}?signal=hold" class="filter-button hold {% if current_signal == 'hold' %}active{% endif %}">
+                HOLD ({{ signal_stats.HOLD }})
+            </a>
+            <a href="/model/{{ model_name }}?signal=neutral" class="filter-button neutral {% if current_signal == 'neutral' %}active{% endif %}">
+                NEUTRAL ({{ signal_stats.NEUTRAL }})
+            </a>
+        </div>
+    </div>
+
+    <div class="container">
+        {% if files_data %}
+            {% for file in files_data %}
+                <div class="card"
+                    data-signal="{{ file.signal }}"
+                    data-accuracy="{{ file.accuracy }}"
+                    data-ticker="{{ file.ticker }}"
+                    data-algorithm="{{ file.algorithm }}"
+                    data-date="{{ file.date }}"
+                    data-expected-change="{{ file.expected_change }}"
+                    data-r-squared="{{ file.r_squared }}">
+
+                    <div class="card-header {% if file.signal %}card-header-{{ file.signal|lower }}{% endif %}">
+                        <span>{{ file.ticker }}</span>
+                        {% if file.signal %}
+                            <span>{{ file.signal }}</span>
+                        {% endif %}
+                    </div>
+
+                    <div class="card-meta">
+                        <span>{{ file.algorithm }}</span>
+                        <span>{{ file.date }}</span>
+                        {% if file.accuracy %}
+                            <span class="accuracy">Точность: {{ "%.2f"|format(file.accuracy) }}%</span>
+                        {% endif %}
+                        {% if file.expected_change is not none %}
+                            <span class="expected-change {% if file.expected_change > 0 %}positive{% else %}negative{% endif %}">
+                                {{ "%.2f"|format(file.expected_change) }}%
+                            </span>
+                        {% endif %}
+                    </div>
+
+                    <div class="card-body">{{ file.content }}</div>
+                </div>
+            {% endfor %}
+        {% else %}
+            <div class="empty-message">
+                {% if current_signal %}
+                    Нет доступных результатов для сигнала {{ current_signal }}.
+                    <a href="/model/{{ model_name }}">Показать все результаты</a>
+                {% else %}
+                    Нет доступных результатов. Добавьте файлы в директорию модели.
+                {% endif %}
+            </div>
+        {% endif %}
+    </div>
+
+    <a href="/model/{{ model_name }}" class="refresh-button" title="Обновить страницу">↻</a>
+
+    <script src="/static/app.js"></script></body>
+</body>
+</html>

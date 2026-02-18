@@ -1,0 +1,15 @@
+.venv
+.venv_310
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+.env
+env/
+output/
+venv/
+ENV/
+.git/
+.idea/
+.vscode/

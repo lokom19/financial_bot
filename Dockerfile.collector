@@ -1,0 +1,24 @@
+FROM python:3.10-slim
+
+WORKDIR /app
+
+# Copy requirements
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Copy source code
+COPY all_dfs_to_db.py .
+COPY get_all_tinkoff_figi.py .
+COPY all_figi_to_db.py .
+COPY tickers.db .
+COPY utils ./utils
+COPY .env .
+
+# Create necessary directories
+RUN mkdir -p /app/dataframes /shared
+
+# Add data collection wrapper script
+COPY ./dockerfiles/data_collector_wrapper.py .
+
+# Run the wrapper script
+CMD ["python", "data_collector_wrapper.py"]

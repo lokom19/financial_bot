@@ -1,0 +1,426 @@
+:root {
+    --primary-color: #2c3e50;
+    --buy-color: #2ecc71;
+    --sell-color: #e74c3c;
+    --hold-color: #f39c12;
+    --neutral-color: #7f8c8d;
+    --border-color: #e1e4e8;
+    --bg-color: #f7f9fc;
+    --card-shadow: 0 4px 10px rgba(0,0,0,0.1);
+    --hover-shadow: 0 10px 20px rgba(0,0,0,0.15);
+}
+
+body {
+    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+    background-color: var(--bg-color);
+    margin: 0;
+    padding: 20px;
+    color: #333;
+}
+
+.header {
+    background-color: var(--primary-color);
+    color: white;
+    padding: 20px;
+    margin-bottom: 30px;
+    border-radius: 8px;
+    box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+    display: flex;
+    flex-direction: column;
+}
+
+.header-title {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 15px;
+}
+
+.header h1 {
+    margin: 0;
+    font-size: 24px;
+}
+
+.back-link {
+    color: white;
+    text-decoration: none;
+    font-size: 20px;
+    margin-right: 5px;
+}
+
+.sorting-controls {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+    padding: 10px 0;
+}
+
+.sorting-option {
+    background-color: rgba(255, 255, 255, 0.2);
+    border-radius: 4px;
+    padding: 8px 12px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    display: flex;
+    align-items: center;
+    font-size: 14px;
+}
+
+.sorting-option:hover {
+    background-color: rgba(255, 255, 255, 0.3);
+}
+
+.sorting-option.active {
+    background-color: rgba(255, 255, 255, 0.4);
+    font-weight: bold;
+}
+
+.sorting-option .sort-arrow {
+    margin-left: 5px;
+    transition: transform 0.2s ease;
+}
+
+.sorting-option .sort-arrow.asc:after {
+    content: "↑";
+}
+
+.sorting-option .sort-arrow.desc:after {
+    content: "↓";
+}
+
+.filter-controls {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+    margin-top: 10px;
+}
+
+.filter-button {
+    padding: 8px 12px;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 14px;
+    transition: all 0.2s ease;
+    border: none;
+    text-decoration: none;
+    display: inline-block;
+    text-align: center;
+}
+
+.filter-button.all {
+    background-color: #7f8c8d;
+    color: white;
+}
+
+.filter-button.buy {
+    background-color: var(--buy-color);
+    color: white;
+}
+
+.filter-button.sell {
+    background-color: var(--sell-color);
+    color: white;
+}
+
+.filter-button.hold {
+    background-color: var(--hold-color);
+    color: white;
+}
+
+.filter-button.neutral {
+    background-color: var(--neutral-color);
+    color: white;
+}
+
+.filter-button:hover {
+    opacity: 0.9;
+}
+
+.filter-button.active {
+    box-shadow: inset 0 0 0 2px white;
+}
+
+.models-container {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 20px;
+    justify-content: flex-start;
+}
+
+.model-card {
+    background-color: white;
+    border-radius: 8px;
+    box-shadow: var(--card-shadow);
+    width: calc(33.333% - 20px);
+    min-width: 300px;
+    overflow: hidden;
+    transition: all 0.3s ease;
+    border: 1px solid var(--border-color);
+}
+
+.model-card:hover {
+    transform: translateY(-5px);
+    box-shadow: var(--hover-shadow);
+}
+
+.model-header {
+    background-color: var(--primary-color);
+    color: white;
+    padding: 15px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.model-header h2 {
+    margin: 0;
+    font-size: 18px;
+}
+
+.file-count {
+    background-color: rgba(255, 255, 255, 0.2);
+    padding: 4px 8px;
+    border-radius: 4px;
+    font-size: 14px;
+}
+
+.model-stats {
+    display: flex;
+    justify-content: space-between;
+    padding: 15px;
+    border-bottom: 1px solid var(--border-color);
+}
+
+.stat-item {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 8px;
+    border-radius: 4px;
+    min-width: 50px;
+}
+
+.stat-label {
+    font-size: 12px;
+    font-weight: bold;
+    margin-bottom: 5px;
+}
+
+.stat-value {
+    font-size: 18px;
+    font-weight: bold;
+}
+
+.stat-item.buy .stat-label {
+    color: var(--buy-color);
+}
+
+.stat-item.sell .stat-label {
+    color: var(--sell-color);
+}
+
+.stat-item.hold .stat-label {
+    color: var(--hold-color);
+}
+
+.stat-item.neutral .stat-label {
+    color: var(--neutral-color);
+}
+
+.model-footer {
+    padding: 15px;
+    text-align: center;
+}
+
+.model-link {
+    display: inline-block;
+    background-color: var(--primary-color);
+    color: white;
+    text-decoration: none;
+    padding: 10px 20px;
+    border-radius: 4px;
+    transition: all 0.2s ease;
+}
+
+.model-link:hover {
+    background-color: #1a2530;
+}
+
+.action-button {
+    display: inline-block;
+    background-color: #3498db;
+    color: white;
+    text-decoration: none;
+    padding: 10px 20px;
+    border-radius: 4px;
+    margin-top: 20px;
+    transition: all 0.2s ease;
+}
+
+.action-button:hover {
+    background-color: #2980b9;
+}
+
+.container {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 20px;
+    justify-content: flex-start;
+}
+
+.card {
+    background-color: white;
+    border-radius: 8px;
+    box-shadow: var(--card-shadow);
+    padding: 0;
+    width: calc(33.333% - 20px);
+    min-width: 300px;
+    overflow: hidden;
+    transition: all 0.3s ease;
+    border: 1px solid var(--border-color);
+}
+
+.card:hover {
+    transform: translateY(-5px);
+    box-shadow: var(--hover-shadow);
+}
+
+.card-header {
+    background-color: #3498db;
+    color: white;
+    padding: 15px;
+    font-weight: 600;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.card-header-buy {
+    background-color: var(--buy-color);
+}
+
+.card-header-sell {
+    background-color: var(--sell-color);
+}
+
+.card-header-hold {
+    background-color: var(--hold-color);
+}
+
+.card-header-neutral {
+    background-color: var(--neutral-color);
+}
+
+.card-header span {
+    font-size: 18px;
+    font-weight: bold;
+}
+
+.card-meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    background-color: #f8f9fa;
+    padding: 8px 15px;
+    border-bottom: 1px solid #e9ecef;
+    font-size: 13px;
+}
+
+.card-meta span {
+    display: flex;
+    align-items: center;
+}
+
+.card-meta .accuracy {
+    background-color: #e9f5ff;
+    padding: 3px 8px;
+    border-radius: 4px;
+    font-weight: bold;
+}
+
+.card-meta .expected-change {
+    padding: 3px 8px;
+    border-radius: 4px;
+    font-weight: bold;
+}
+
+.card-meta .expected-change.positive {
+    background-color: rgba(46, 204, 113, 0.2);
+    color: var(--buy-color);
+}
+
+.card-meta .expected-change.negative {
+    background-color: rgba(231, 76, 60, 0.2);
+    color: var(--sell-color);
+}
+
+.card-body {
+    padding: 20px;
+    font-family: 'Courier New', Courier, monospace;
+    white-space: pre-wrap;
+    max-height: 400px;
+    overflow-y: auto;
+    font-size: 14px;
+    line-height: 1.6;
+}
+
+.signal-highlight {
+    background-color: rgba(255, 255, 0, 0.2);
+    padding: 2px 4px;
+    border-radius: 3px;
+    font-weight: bold;
+}
+
+.refresh-button {
+    position: fixed;
+    bottom: 20px;
+    right: 20px;
+    background-color: #3498db;
+    color: white;
+    border: none;
+    border-radius: 50%;
+    width: 60px;
+    height: 60px;
+    font-size: 24px;
+    cursor: pointer;
+    box-shadow: 0 4px 10px rgba(0,0,0,0.2);
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    transition: all 0.3s ease;
+    z-index: 1000;
+}
+
+.refresh-button:hover {
+    background-color: #2980b9;
+    transform: rotate(45deg);
+}
+
+.empty-message {
+    text-align: center;
+    width: 100%;
+    padding: 40px;
+    background-color: white;
+    border-radius: 8px;
+    box-shadow: 0 4px 10px rgba(0,0,0,0.1);
+    margin: 20px 0;
+}
+
+@media (max-width: 1200px) {
+    .card, .model-card {
+        width: calc(50% - 20px);
+    }
+}
+
+@media (max-width: 768px) {
+    .card, .model-card {
+        width: 100%;
+    }
+    .header h1 {
+        font-size: 20px;
+    }
+    .sorting-controls, .filter-controls {
+        flex-direction: column;
+        gap: 5px;
+    }
+}

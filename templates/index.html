@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Модели прогнозирования</title>
+    <link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+    <div class="header">
+        <div class="header-title">
+            <h1>Результаты моделей прогнозирования</h1>
+            <span id="time-info">Последнее обновление: ...</span>
+        </div>
+
+        <div class="sorting-controls">
+            <div class="sorting-option active" data-sort="accuracy">
+                <span>По точности</span>
+                <span class="sort-arrow desc"></span>
+            </div>
+            <div class="sorting-option" data-sort="signal">
+                <span>По сигналу</span>
+                <span class="sort-arrow"></span>
+            </div>
+            <div class="sorting-option" data-sort="ticker">
+                <span>По тикеру</span>
+                <span class="sort-arrow"></span>
+            </div>
+            <div class="sorting-option" data-sort="date">
+                <span>По дате</span>
+                <span class="sort-arrow"></span>
+            </div>
+            <div class="sorting-option" data-sort="algorithm">
+                <span>По алгоритму</span>
+                <span class="sort-arrow"></span>
+            </div>
+        </div>
+
+        <div class="filter-controls">
+            <button class="filter-button all active" data-filter="all">Все сигналы</button>
+            <button class="filter-button buy" data-filter="buy">BUY</button>
+            <button class="filter-button sell" data-filter="sell">SELL</button>
+            <button class="filter-button hold" data-filter="hold">HOLD</button>
+            <button class="filter-button neutral" data-filter="neutral">NEUTRAL</button>
+        </div>
+    </div>
+
+    <div class="container">
+        {% if files_data %}
+            {% for file in files_data %}
+                <div class="card"
+                    data-signal="{{ file.signal }}"
+                    data-accuracy="{{ file.accuracy }}"
+                    data-ticker="{{ file.ticker }}"
+                    data-algorithm="{{ file.algorithm }}"
+                    data-date="{{ file.date }}">
+
+                    <div class="card-header {% if file.signal %}card-header-{{ file.signal|lower }}{% endif %}">
+                        <span>{{ file.ticker }}</span>
+                        {% if file.signal %}
+                            <span>{{ file.signal }}</span>
+                        {% endif %}
+                    </div>
+
+                    <div class="card-meta">
+                        <span>{{ file.algorithm }}</span>
+                        <span>{{ file.date }}</span>
+                        {% if file.accuracy %}
+                            <span class="accuracy">Точность: {{ "%.2f"|format(file.accuracy) }}%</span>
+                        {% endif %}
+                    </div>
+
+                    <div class="card-body">{{ file.content }}</div>
+                </div>
+            {% endfor %}
+        {% else %}
+            <div class="empty-message">Нет доступных результатов. Проверьте директорию output.</div>
+        {% endif %}
+    </div>
+
+    <a href="/" class="refresh-button" title="Обновить страницу">↻</a>
+
+    <script src="/static/app.js"></script></body>
+</html>

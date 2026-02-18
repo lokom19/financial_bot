@@ -1,0 +1,22 @@
+FROM python:3.10-slim
+
+WORKDIR /app
+
+# Install dependencies
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt matplotlib scikit-learn tensorflow statsmodels xgboost
+
+# Copy model files
+COPY models/* models/
+COPY pydantic_models/* pydantic_models/
+COPY utils ./utils
+COPY .env .
+
+# Create necessary directories
+RUN mkdir -p /app/dataframes /shared /app/output
+
+# Add wrapper script
+COPY ./dockerfiles/model_trainer_wrapper.py .
+
+# Wait for data collection to complete and then run training
+CMD ["python", "model_trainer_wrapper.py"]
