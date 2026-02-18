@@ -17,10 +17,172 @@ from sklearn.preprocessing import RobustScaler
 from utils.load_data_method import load_data
 from utils.load_crypto_data import load_data as load_crypto_data
 
-
+# Import core modules
+from core.feature_engineering import create_features as core_create_features, FeatureSet
 
 # Отключаем предупреждения
 warnings.filterwarnings("ignore")
+
+
+# ============================================================
+# NEW IMPLEMENTATION: RandomForestClassifierNew
+# This fixes data leakage by fitting scaler only on training data
+# ============================================================
+
+class RandomForestClassifierNew:
+    """
+    Random Forest Classifier for direction prediction with no data leakage.
+
+    Key fix: Scaler is fitted ONLY on training data, not the entire dataset.
+    """
+
+    MODEL_NAME = "rf_classifier"
+    REQUIRED_FEATURES = {FeatureSet.BASIC, FeatureSet.VOLUME, FeatureSet.VOLATILITY, FeatureSet.MOMENTUM}
+
+    def __init__(self, params=None, test_size: float = 0.2, random_state: int = 42):
+        self.test_size = test_size
+        self.random_state = random_state
+
+        self.default_params = {
+            'n_estimators': 100,
+            'max_depth': None,
+            'min_samples_split': 2,
+            'min_samples_leaf': 1,
+            'max_features': 'sqrt',
+            'bootstrap': True,
+            'random_state': random_state,
+            'class_weight': 'balanced',
+            'n_jobs': -1
+        }
+
+        self.params = self.default_params.copy()
+        if params:
+            self.params.update(params)
+
+        self.model = RandomForestClassifier(**self.params)
+        self.scaler = RobustScaler()
+        self.feature_columns = None
+        self.is_fitted = False
+        self.feature_importances = None
+
+    def prepare_features(self, df: pd.DataFrame) -> pd.DataFrame:
+        """Create features using core module."""
+        return core_create_features(df, feature_sets=self.REQUIRED_FEATURES)
+
+    def train(self, df: pd.DataFrame) -> dict:
+        """
+        Train the classifier with proper data handling.
+
+        IMPORTANT: Scaler is fitted ONLY on training data to prevent data leakage.
+        """
+        # Create features
+        df_features = self.prepare_features(df)
+
+        # Create target variable (1 if next close > current close)
+        df_features['price_up'] = (df_features['next_close'] > df_features['close']).astype(int)
+
+        # Prepare feature matrix
+        exclude_cols = ['timestamp', 'price_up', 'next_close', 'volume']
+        feature_cols = [c for c in df_features.columns if c not in exclude_cols]
+        self.feature_columns = feature_cols
+
+        X = df_features[feature_cols].copy()
+        y = df_features['price_up']
+
+        # Handle infinities and NaN
+        X = X.replace([np.inf, -np.inf], np.nan)
+        X = X.fillna(X.median())
+
+        # Clip outliers
+        for col in X.columns:
+            q_low, q_high = X[col].quantile([0.01, 0.99])
+            X[col] = X[col].clip(lower=q_low, upper=q_high)
+
+        # Split data BEFORE scaling (critical for no data leakage)
+        X_train, X_test, y_train, y_test = train_test_split(
+            X, y, test_size=self.test_size, random_state=self.random_state, shuffle=False
+        )
+
+        # Fit scaler ONLY on training data
+        X_train_scaled = self.scaler.fit_transform(X_train)
+        X_test_scaled = self.scaler.transform(X_test)
+
+        # Train model
+        self.model.fit(X_train_scaled, y_train)
+        self.is_fitted = True
+
+        # Extract feature importances
+        self.feature_importances = pd.DataFrame({
+            'Feature': self.feature_columns,
+            'Importance': self.model.feature_importances_
+        }).sort_values('Importance', ascending=False)
+
+        # Predictions
+        y_train_pred = self.model.predict(X_train_scaled)
+        y_test_pred = self.model.predict(X_test_scaled)
+        y_test_proba = self.model.predict_proba(X_test_scaled)[:, 1]
+
+        # Calculate metrics
+        metrics = {
+            'train_accuracy': accuracy_score(y_train, y_train_pred),
+            'test_accuracy': accuracy_score(y_test, y_test_pred),
+            'test_precision': precision_score(y_test, y_test_pred, zero_division=0),
+            'test_recall': recall_score(y_test, y_test_pred, zero_division=0),
+            'test_f1': f1_score(y_test, y_test_pred, zero_division=0),
+            'test_roc_auc': roc_auc_score(y_test, y_test_proba) if len(np.unique(y_test)) > 1 else 0.5
+        }
+
+        # Store for backtest
+        self._last_y_test = y_test
+        self._last_y_pred = y_test_pred
+        self._last_y_proba = y_test_proba
+        self._last_prices = df_features['close'].iloc[-len(y_test):].values
+
+        return metrics
+
+    def predict_next(self, df: pd.DataFrame) -> dict:
+        """Predict direction for the next period."""
+        if not self.is_fitted:
+            raise RuntimeError("Model must be fitted before prediction")
+
+        df_features = self.prepare_features(df)
+        X = df_features[self.feature_columns].iloc[[-1]].copy()
+
+        X = X.replace([np.inf, -np.inf], np.nan)
+        X = X.fillna(X.median())
+
+        X_scaled = self.scaler.transform(X)
+        prob_up = self.model.predict_proba(X_scaled)[0, 1]
+        prob_down = 1 - prob_up
+
+        direction = "UP" if prob_up > 0.5 else "DOWN"
+        confidence = max(prob_up, prob_down)
+
+        # Signal based on confidence threshold
+        if confidence > 0.6:
+            signal = "BUY" if direction == "UP" else "SELL"
+        else:
+            signal = "HOLD"
+
+        return {
+            'current_price': float(df['close'].iloc[-1]),
+            'direction': direction,
+            'probability_up': prob_up,
+            'probability_down': prob_down,
+            'confidence': confidence,
+            'signal': signal
+        }
+
+    def get_feature_importance(self, top_n: int = 10) -> pd.DataFrame:
+        """Get top N important features."""
+        if self.feature_importances is None:
+            return None
+        return self.feature_importances.head(top_n)
+
+
+# ============================================================
+# LEGACY IMPLEMENTATION: Kept for backward compatibility
+# ============================================================
 
 # Функция для создания технических индикаторов
 def create_features(df):
@@ -714,111 +876,70 @@ class RandomForestDirectionModel:
 
 # Основная функция
 def main(db_path):
-    # Загружаем данные
+    """
+    Main training function using the new RandomForestClassifierNew.
+
+    This implementation:
+    - Uses core modules for proper data handling
+    - Avoids data leakage (scaler fitted only on training data)
+    - Provides comprehensive output for metrics parsing
+    """
     print("Загрузка данных...")
-
     df = load_data(db_path)
-    # df = load_crypto_data(db_path)
-    # df["timestamp"] = df["open_time"]
-    # df = df.drop(["open_time"], axis=1)
-    # df = df.drop(["close_time"], axis=1)
-    try:
-        df = df.drop(["figi"], axis=1)
-    except KeyError:
-        pass  # Column doesn't exist
 
+    if 'figi' in df.columns:
+        df = df.drop(['figi'], axis=1)
+
+    print(df.tail(3))
     print(
-        f"Загружено {len(df)} записей за период с {df['timestamp'].min() if not df.empty else 'N/A'} по {df['timestamp'].max() if not df.empty else 'N/A'}")
+        f"Загружено {len(df)} записей за период с {df['timestamp'].min() if not df.empty else 'N/A'} "
+        f"по {df['timestamp'].max() if not df.empty else 'N/A'}"
+    )
 
-    # Проверка на пустой DataFrame
-    if df.empty:
-        print(f"ОШИБКА: Файл {db_path} не содержит данных. Пропускаем обработку.")
-        return None, None
+    if df.empty or len(df) < 50:
+        print(f"ОШИБКА: Недостаточно данных для {db_path}. Минимум 50 записей.")
+        return None
 
-    # Создаем признаки
-    print("\nСоздание признаков...")
-    df_features = create_features(df)
-    print(f"Создано признаков: {len(df_features.columns) - 3}")  # -3 для timestamp, next_close и price_up
-
-    # Проверка на пустой DataFrame после создания признаков
-    if df_features.empty:
-        print(
-            f"ОШИБКА: После создания признаков для {db_path} не осталось данных (возможно, из-за NaN). Пропускаем обработку.")
-        return None, None
-
-    # Информация о признаках
-    print("\nСтатистика признаков:")
-    print(df_features.describe().T[['mean', 'min', 'max', 'std']])
-
-    # Проверка на бесконечные значения
-    inf_check = np.isinf(df_features.select_dtypes(include=[np.number])).sum().sum()
-    if inf_check > 0:
-        print(f"ВНИМАНИЕ: обнаружено {inf_check} бесконечных значений. Они будут обработаны.")
-
-    # Информация о целевой переменной
-    up_count = df_features['price_up'].sum()
-    down_count = len(df_features) - up_count
-    up_percentage = up_count / len(df_features) * 100
-
-    print(f"\nРаспределение целевой переменной:")
-    print(f"UP (рост): {up_count} ({up_percentage:.2f}%)")
-    print(f"DOWN (падение): {down_count} ({100 - up_percentage:.2f}%)")
-
-    # Создаем и обучаем модель
     print("\nОбучение модели Random Forest Classifier...")
-    model = RandomForestDirectionModel()
+    print("ВАЖНО: Scaler обучается ТОЛЬКО на тренировочных данных (без data leakage)")
 
-    # Подготавливаем данные
-    X_original, X_scaled, y, timestamps = model.prepare_data(df_features)
+    model = RandomForestClassifierNew()
 
-    # Обучаем модель
-    X_test, y_test, y_pred, y_proba, test_metrics = model.train(X_original, y, timestamps)
+    try:
+        metrics = model.train(df)
+    except Exception as e:
+        print(f"ОШИБКА при обучении: {e}")
+        import traceback
+        traceback.print_exc()
+        return None
 
-    # Проводим кросс-валидацию
-    print("\nПроводим кросс-валидацию модели...")
-    cv_results = model.cross_validate(X_original, y, cv=5)
+    # Выводим метрики
+    print("\n" + "=" * 50)
+    print("МЕТРИКИ МОДЕЛИ (КЛАССИФИКАЦИЯ)")
+    print("=" * 50)
 
-    # Анализируем результаты
-    print("\nЛучшие признаки по важности:")
-    print(model.feature_importances.head(10))
+    print("\nМетрики на тестовой выборке:")
+    print(f"Accuracy: {metrics.get('test_accuracy', 0):.4f}")
+    print(f"Precision: {metrics.get('test_precision', 0):.4f}")
+    print(f"Recall: {metrics.get('test_recall', 0):.4f}")
+    print(f"F1-Score: {metrics.get('test_f1', 0):.4f}")
+    print(f"ROC-AUC: {metrics.get('test_roc_auc', 0):.4f}")
 
-    # Выводим последние 5 прогнозов и сравниваем с фактическими значениями
-    if len(y_test) > 0:
-        print("\nПоследние 5 прогнозов:")
-        last_n = min(5, len(y_test))
-        for i in range(last_n):
-            idx = len(y_test) - last_n + i
-            actual = "UP" if y_test.iloc[idx] == 1 else "DOWN"
-            predicted = "UP" if y_pred[idx] == 1 else "DOWN"
-            prob_up = y_proba[idx] #  это вероятность роста (класс "UP"), предсказанная моделью Random Forest
-            prob_down = 1 - prob_up     # это вероятность падения (класс "DOWN"),
+    print(f"\nМетрики на тренировочной выборке:")
+    print(f"Accuracy: {metrics.get('train_accuracy', 0):.4f}")
 
-            print(f"#{idx} Фактически: {actual}, Прогноз: {predicted}, "
-                  f"Вероятность UP: {prob_up:.4f}, Вероятность DOWN: {prob_down:.4f}, "
-                  f"Уверенность: {max(prob_up, prob_down):.4f}")   # Уверенность в выводе - это просто максимальная из двух вероятностей.
+    # Важность признаков
+    feature_imp = model.get_feature_importance()
+    if feature_imp is not None:
+        print("\nВажность признаков (топ-10):")
+        print(feature_imp.to_string(index=False))
 
-    # Прогноз на следующий день
-    print("\nПрогноз на следующий день:")
-    # Берем последнюю строку из оригинального датасета
-    latest_row = df.iloc[-1:].copy()
+    # Прогноз
+    print("\n" + "=" * 50)
+    print("ПРОГНОЗ НА СЛЕДУЮЩИЙ ВРЕМЕННОЙ ИНТЕРВАЛ")
+    print("=" * 50)
 
-    # Создаем признаки только для этой строки
-    latest_features = create_features(
-        pd.concat([df.iloc[-30:].iloc[:-1], latest_row]))  # Берем предыдущие 30 дней для расчета индикаторов
-    latest_features = latest_features.iloc[-1:].copy()  # Оставляем только последнюю строку с рассчитанными признаками
-
-    # Если в latest_features есть NaN в next_close, заменяем его на 0 или другое значение
-    if 'next_close' in latest_features.columns and latest_features['next_close'].isna().any():
-        latest_features['next_close'] = 0  # или другое подходящее значение
-    # last_data = df_features.iloc[-1:].copy()
-    """
-    берется вчерашний день, по нему предсказывается next_close для сегодняшнего дня, что означает, 
-    что предсказывается цена актива на завтрашний день => лучше делать прогноз вечером, т.к. для вчерашнего дня 
-    есть актуальная next_close (т.е. сегодняшняя цена закрытия она уже не будет менять после закрытия биржи)
-    и по результатам прогноза мы получим next_close для сегодняшнего дня => цену актива на завтра  
-    """
-    print(latest_features)
-    prediction = model.predict_next(latest_features)
+    prediction = model.predict_next(df)
 
     print(f"Текущая цена: {prediction['current_price']:.4f}")
     print(f"Прогноз направления: {prediction['direction']}")
@@ -827,26 +948,48 @@ def main(db_path):
     print(f"Уверенность: {prediction['confidence']:.4f}")
     print(f"Торговый сигнал: {prediction['signal']}")
 
-    # Анализ эффективности модели
-    print("\nАнализ эффективности модели на тестовых данных:")
-    perf_analysis = model.analyze_model_performance(X_test, y_test, y_pred, y_proba)
+    # Backtest
+    print("\n" + "=" * 50)
+    print("РЕТРОСПЕКТИВНАЯ ОЦЕНКА ТОРГОВЫХ СИГНАЛОВ")
+    print("=" * 50)
 
-    if perf_analysis:
-        trading_metrics = perf_analysis['trading_metrics']
-        print(f"Всего сделок: {trading_metrics['total_trades']}")
-        print(f"Прибыльных сделок: {trading_metrics['winning_trades']} ({trading_metrics['win_rate'] * 100:.2f}%)")
-        print(f"Коэффициент выигрыша (Profit Factor): {trading_metrics['profit_factor']:.2f}")
-        print(f"Средняя прибыльная сделка: {trading_metrics['avg_win'] * 100:.2f}%")
-        print(f"Средняя убыточная сделка: {trading_metrics['avg_loss'] * 100:.2f}%")
-        print(f"Sharpe Ratio: {trading_metrics['sharpe_ratio']:.4f}")
-        print(f"Максимальная просадка: {trading_metrics['max_drawdown'] * 100:.2f}%")
-        print(f"Общая доходность: {trading_metrics['final_return'] * 100:.2f}%")
+    _run_classifier_backtest(model)
 
-    # Сохраняем модель
-    model_filename = f"rf_direction_model_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pkl"
-    # model.save_model(model_filename)
+    return model
 
-    return model, df_features
+
+def _run_classifier_backtest(model: RandomForestClassifierNew):
+    """Run backtest for classifier model."""
+    if not hasattr(model, '_last_y_test'):
+        print("Недостаточно данных для бэктеста")
+        return
+
+    y_test = model._last_y_test
+    y_pred = model._last_y_pred
+    prices = model._last_prices
+
+    if len(y_test) < 2:
+        print("Недостаточно данных для бэктеста")
+        return
+
+    # Calculate returns based on predictions
+    price_returns = np.diff(prices) / prices[:-1]
+    signals = y_pred[:-1]  # 1 = predict UP (buy), 0 = predict DOWN (sell/short)
+    strategy_signals = np.where(signals == 1, 1, -1)  # Convert to +1/-1
+    strategy_returns = strategy_signals * price_returns
+
+    cumulative_returns = (1 + strategy_returns).cumprod() - 1
+    total_trades = len(strategy_returns)
+    profitable_trades = np.sum(strategy_returns > 0)
+
+    profit_sum = np.sum(strategy_returns[strategy_returns > 0])
+    loss_sum = abs(np.sum(strategy_returns[strategy_returns < 0]))
+    profit_factor = profit_sum / loss_sum if loss_sum > 0 else float('inf')
+
+    print(f"Всего сделок: {total_trades}")
+    print(f"Прибыльных сделок: {profitable_trades} ({profitable_trades / total_trades * 100:.2f}%)")
+    print(f"Общая доходность: {cumulative_returns[-1] * 100:.2f}%")
+    print(f"Коэффициент прибыли (Profit Factor): {profit_factor:.2f}")
 
 
 if __name__ == "__main__":

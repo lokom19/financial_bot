@@ -1,3 +1,4 @@
+import argparse
 import asyncio
 import logging
 import os
@@ -30,6 +31,21 @@ if not TOKEN:
 MAX_RETRIES = 5
 INITIAL_BACKOFF = 2  # секунды
 MAX_BACKOFF = 60  # максимальная задержка в секундах
+
+# Маппинг названий интервалов на enum значения
+INTERVAL_MAP = {
+    '1min': CandleInterval.CANDLE_INTERVAL_1_MIN,
+    '5min': CandleInterval.CANDLE_INTERVAL_5_MIN,
+    '15min': CandleInterval.CANDLE_INTERVAL_15_MIN,
+    'hour': CandleInterval.CANDLE_INTERVAL_HOUR,
+    'day': CandleInterval.CANDLE_INTERVAL_DAY,
+    'week': CandleInterval.CANDLE_INTERVAL_WEEK,
+    'month': CandleInterval.CANDLE_INTERVAL_MONTH,
+}
+
+# Значения по умолчанию
+DEFAULT_DAYS = 1000
+DEFAULT_INTERVAL = 'day'
 
 # Конфигурация базы данных PostgreSQL
 DB_HOST = os.environ.get("DB_HOST", "localhost")
@@ -68,21 +84,31 @@ def quotation_to_float(quotation):
     return quotation.units + quotation.nano / 1_000_000_000
 
 
-async def get_df(figi, ticker_info):
-    """Получение данных свечей с механизмом повторных попыток"""
+async def get_df(figi, ticker_info, days: int = DEFAULT_DAYS, interval: CandleInterval = None):
+    """Получение данных свечей с механизмом повторных попыток.
+
+    Args:
+        figi: FIGI инструмента
+        ticker_info: Информация о тикере (tuple)
+        days: Количество дней для загрузки данных (по умолчанию 1000)
+        interval: Интервал свечей (по умолчанию CANDLE_INTERVAL_DAY)
+    """
+    if interval is None:
+        interval = CandleInterval.CANDLE_INTERVAL_DAY
+
     retry_count = 0
     ticker_name = ticker_info[1] if len(ticker_info) > 1 else "Unknown"
 
     while retry_count < MAX_RETRIES:
         try:
-            logger.info(f"Попытка {retry_count + 1} получения данных для {figi} ({ticker_name})")
+            logger.info(f"Попытка {retry_count + 1} получения данных для {figi} ({ticker_name}) за {days} дней, интервал: {interval.name}")
 
             async with AsyncClient(TOKEN) as client:
                 # Устанавливаем таймаут для соединения
                 candles = client.get_all_candles(
                     instrument_id=figi,
-                    from_=now() - timedelta(days=1000),
-                    interval=CandleInterval.CANDLE_INTERVAL_DAY,
+                    from_=now() - timedelta(days=days),
+                    interval=interval,
                     candle_source_type=CandleSource.CANDLE_SOURCE_EXCHANGE,
                 )
 
@@ -206,15 +232,24 @@ async def get_df(figi, ticker_info):
             await asyncio.sleep(wait_time)
 
 
-async def process_tickers(tickers):
-    """Обработка списка тикеров с ограничением параллельности"""
+async def process_tickers(tickers, days: int = DEFAULT_DAYS, interval: CandleInterval = None):
+    """Обработка списка тикеров с ограничением параллельности.
+
+    Args:
+        tickers: Список тикеров для обработки
+        days: Количество дней для загрузки данных
+        interval: Интервал свечей
+    """
+    if interval is None:
+        interval = CandleInterval.CANDLE_INTERVAL_DAY
+
     # Ограничиваем количество одновременных запросов
     semaphore = asyncio.Semaphore(1)  # не более 1 одновременных запросов
 
     async def process_ticker(ticker_info):
         figi = ticker_info[0]
         async with semaphore:
-            res = await get_df(figi, ticker_info)
+            res = await get_df(figi, ticker_info, days=days, interval=interval)
             # await asyncio.sleep(1)
             return res
 
@@ -238,8 +273,16 @@ async def process_tickers(tickers):
     return success_count, error_count
 
 
-async def main_async():
-    """Асинхронная основная функция"""
+async def main_async(days: int = DEFAULT_DAYS, interval: CandleInterval = None):
+    """Асинхронная основная функция.
+
+    Args:
+        days: Количество дней для загрузки данных
+        interval: Интервал свечей
+    """
+    if interval is None:
+        interval = CandleInterval.CANDLE_INTERVAL_DAY
+
     start_time = time.time()
 
     try:
@@ -248,8 +291,9 @@ async def main_async():
 
         tickers = get_tickers_from_bd()
         logger.info(f"Получено {len(tickers)} тикеров для обработки")
+        logger.info(f"Параметры: период={days} дней, интервал={interval.name}")
 
-        success, errors = await process_tickers(tickers)
+        success, errors = await process_tickers(tickers, days=days, interval=interval)
 
         end_time = time.time()
         execution_time = end_time - start_time
@@ -275,10 +319,57 @@ async def main_async():
         }
 
 
-def main():
-    """Точка входа для запуска из других модулей или напрямую"""
-    return asyncio.run(main_async())
+def parse_args():
+    """Парсинг аргументов командной строки."""
+    parser = argparse.ArgumentParser(
+        description='Загрузка исторических данных свечей из Tinkoff API в PostgreSQL',
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog='''
+Примеры использования:
+  python all_dfs_to_db.py                      # По умолчанию: 1000 дней, дневные свечи
+  python all_dfs_to_db.py --days 365           # Загрузить данные за последний год
+  python all_dfs_to_db.py --days 30 --interval hour  # 30 дней, часовые свечи
+  python all_dfs_to_db.py --interval 5min      # 1000 дней, 5-минутные свечи
+
+Доступные интервалы: 1min, 5min, 15min, hour, day, week, month
+        '''
+    )
+
+    parser.add_argument(
+        '--days', '-d',
+        type=int,
+        default=DEFAULT_DAYS,
+        help=f'Количество дней для загрузки данных (по умолчанию: {DEFAULT_DAYS})'
+    )
+
+    parser.add_argument(
+        '--interval', '-i',
+        type=str,
+        default=DEFAULT_INTERVAL,
+        choices=list(INTERVAL_MAP.keys()),
+        help=f'Интервал свечей (по умолчанию: {DEFAULT_INTERVAL})'
+    )
+
+    return parser.parse_args()
+
+
+def main(days: int = None, interval_name: str = None):
+    """Точка входа для запуска из других модулей или напрямую.
+
+    Args:
+        days: Количество дней для загрузки данных (если None, используется DEFAULT_DAYS)
+        interval_name: Название интервала (если None, используется DEFAULT_INTERVAL)
+    """
+    if days is None:
+        days = DEFAULT_DAYS
+    if interval_name is None:
+        interval_name = DEFAULT_INTERVAL
+
+    interval = INTERVAL_MAP.get(interval_name, CandleInterval.CANDLE_INTERVAL_DAY)
+    return asyncio.run(main_async(days=days, interval=interval))
 
 
 if __name__ == '__main__':
-    main()
+    args = parse_args()
+    interval = INTERVAL_MAP.get(args.interval, CandleInterval.CANDLE_INTERVAL_DAY)
+    asyncio.run(main_async(days=args.days, interval=interval))

@@ -51,29 +51,38 @@ health:
 # DATA COLLECTION (Tinkoff API)
 # ============================================================
 
+# Default values for candle fetching
+DAYS ?= 1000
+INTERVAL ?= day
+
 # Fetch all tickers from Tinkoff API and save to database
 fetch-tickers:
 	@echo "Fetching tickers from Tinkoff API..."
-	python all_figi_to_db.py --test
+	python all_figi_to_db.py
 	@echo "✓ Tickers saved to public.tickers"
 
 # Fetch historical candles for all tickers (requires fetch-tickers first)
+# Usage: make fetch-candles [DAYS=365] [INTERVAL=hour]
 fetch-candles:
 	@echo "Fetching historical candles from Tinkoff API..."
+	@echo "Parameters: DAYS=$(DAYS), INTERVAL=$(INTERVAL)"
 	@echo "This may take a while depending on the number of tickers..."
-	python all_dfs_to_db.py
+	python all_dfs_to_db.py --days $(DAYS) --interval $(INTERVAL)
 	@echo "✓ Candles saved to all_dfs schema"
 
 # Full data collection: tickers + candles
+# Usage: make fetch-data [DAYS=365] [INTERVAL=hour]
 fetch-data: fetch-tickers fetch-candles
 	@echo "✓ Data collection completed!"
 
 # Test mode: only SBER, YNDX, VTBR, TCSG, OZON
+# Usage: make fetch-test [DAYS=365] [INTERVAL=hour]
 fetch-test:
 	@echo "Fetching test tickers (SBER, YNDX, VTBR, TCSG, OZON)..."
 	python all_figi_to_db.py --test
 	@echo "Fetching candles for test tickers..."
-	python all_dfs_to_db.py
+	@echo "Parameters: DAYS=$(DAYS), INTERVAL=$(INTERVAL)"
+	python all_dfs_to_db.py --days $(DAYS) --interval $(INTERVAL)
 	@echo "✓ Test data collection completed!"
 
 # Check data status
@@ -107,6 +116,18 @@ list-models:
 # Dry run (test training without saving)
 train-dry:
 	python scripts/train_models.py --dry-run
+
+# ============================================================
+# STREAMLIT DASHBOARD
+# ============================================================
+
+# Run Streamlit dashboard
+dashboard:
+	streamlit run streamlit_app/app.py
+
+# Install Streamlit dependencies
+dashboard-install:
+	pip install -r streamlit_app/requirements.txt
 
 # ============================================================
 # DOCKER
@@ -175,10 +196,13 @@ help:
 	@echo "    make db-setup      - Create database tables"
 	@echo ""
 	@echo "  DATA COLLECTION:"
-	@echo "    make fetch-data    - Full data collection (tickers + candles)"
-	@echo "    make fetch-tickers - Fetch tickers from Tinkoff API"
-	@echo "    make fetch-candles - Fetch historical candles"
-	@echo "    make data-status   - Check data collection status"
+	@echo "    make fetch-data              - Full data collection (tickers + candles)"
+	@echo "    make fetch-tickers           - Fetch tickers from Tinkoff API"
+	@echo "    make fetch-candles           - Fetch historical candles (default: 1000 days, daily)"
+	@echo "    make fetch-candles DAYS=365  - Fetch candles for 365 days"
+	@echo "    make fetch-candles INTERVAL=hour  - Fetch hourly candles"
+	@echo "    make data-status             - Check data collection status"
+	@echo "    Intervals: 1min, 5min, 15min, hour, day, week, month"
 	@echo ""
 	@echo "  SERVER:"
 	@echo "    make server        - Run development server (port 8000)"
@@ -189,6 +213,10 @@ help:
 	@echo "    make train              - Train all models"
 	@echo "    make train-model MODEL=ridge  - Train specific model"
 	@echo "    make list-models        - List available models"
+	@echo ""
+	@echo "  DASHBOARD:"
+	@echo "    make dashboard          - Run Streamlit dashboard (port 8501)"
+	@echo "    make dashboard-install  - Install dashboard dependencies"
 	@echo ""
 	@echo "  DOCKER:"
 	@echo "    make docker-build  - Build Docker images"

@@ -603,109 +603,120 @@ class XGBoostTradeModel:
 
 # Основная функция
 def main(db_path):
+    """
+    Main training function using the new XGBoostTradeModelNew.
+
+    This implementation:
+    - Uses core modules for proper data handling
+    - Avoids data leakage (scaler fitted only on training data)
+    - Provides comprehensive output for metrics parsing
+    """
     print("Загрузка данных...")
-    # table_name = os.path.basename(db_path)[:-3]  # Используем имя файла без .db
-    # df = load_data(db_path, table_name)
     df = load_data(db_path)
-    df = df.drop(["figi"], axis=1)
+
+    if 'figi' in df.columns:
+        df = df.drop(['figi'], axis=1)
+
     print(df.tail(3))
     print(
-        f"Загружено {len(df)} записей за период с {df['timestamp'].min() if not df.empty else 'N/A'} по {df['timestamp'].max() if not df.empty else 'N/A'}"
+        f"Загружено {len(df)} записей за период с {df['timestamp'].min() if not df.empty else 'N/A'} "
+        f"по {df['timestamp'].max() if not df.empty else 'N/A'}"
     )
-    if df.empty:
-        print(f"ОШИБКА: Файл {db_path} не содержит данных.")
-        return None, None
-    print("\nСоздание признаков...")
-    df_features = create_features(df)
-    print(f"Создано признаков: {len(df_features.columns) - 2}")
-    if df_features.empty:
-        print(f"ОШИБКА: После создания признаков для {db_path} не осталось данных.")
-        return None, None
-    print("\nСтатистика признаков:")
-    print(df_features.describe().T[["mean", "min", "max", "std"]])
-    inf_check = np.isinf(df_features.select_dtypes(include=[np.number])).sum().sum()
-    if inf_check > 0:
-        print(f"ВНИМАНИЕ: Обнаружено {inf_check} бесконечных значений.")
+
+    if df.empty or len(df) < 50:
+        print(f"ОШИБКА: Недостаточно данных для {db_path}. Минимум 50 записей.")
+        return None
+
     print("\nОбучение модели XGBoost...")
-    model = XGBoostTradeModel()
-    X_original, X_scaled, y, timestamps = model.prepare_data(df_features)
-    if X_original.shape[0] == 0:
-        print(f"ОШИБКА: После подготовки данных для {db_path} не осталось записей.")
-        return None, None
-    X_test, y_test, predictions, test_metrics = model.train(
-        X_original, y, timestamps, X_scaled, df_features
-    )
-    if X_test is None:  # Проверка на случай ошибки обучения
-        return None, None
-    print("\nВажность признаков (топ-10):")
-    print(model.get_feature_importance(10))
-    print("\nПоследние 5 предсказаний:")
-    last_indices = range(len(y_test) - 5, len(y_test))
-    for i in last_indices:
-        real_price = y_test.iloc[i]
-        pred_price = predictions[i]
-        error_pct = (
-            (pred_price - real_price) / real_price * 100
-            if not np.isnan(real_price) and real_price != 0
-            else float("nan")
-        )
-        print(
-            f"Реальная цена next_close: {real_price:.4f}, Предсказанная цена next_close: {pred_price:.4f}, Ошибка: {error_pct:.2f}%"
-        )
+    print("ВАЖНО: Scaler обучается ТОЛЬКО на тренировочных данных (без data leakage)")
 
-    print("\nПрогноз на следующий интервал:")
-    # Берем последнюю строку из оригинального датасета
-    latest_row = df.iloc[-1:].copy()
+    model = XGBoostTradeModelNew()
 
-    # Создаем признаки только для этой строки
-    latest_features = create_features(
-        pd.concat([df.iloc[-30:].iloc[:-1], latest_row])
-    )  # Берем предыдущие 30 дней для расчета индикаторов
-    latest_features = latest_features.iloc[
-        -1:
-    ].copy()  # Оставляем только последнюю строку с рассчитанными признаками
+    try:
+        metrics = model.train(df)
+    except Exception as e:
+        print(f"ОШИБКА при обучении: {e}")
+        return None
 
-    # Если в latest_features есть NaN в next_close, заменяем его на 0 или другое значение
-    if (
-        "next_close" in latest_features.columns
-        and latest_features["next_close"].isna().any()
-    ):
-        latest_features["next_close"] = 0  # или другое подходящее значение
+    # Выводим метрики
+    print("\n" + "=" * 50)
+    print("МЕТРИКИ МОДЕЛИ")
+    print("=" * 50)
 
-    print(latest_features)
-    prediction = model.predict_next(latest_features)
+    print("\nМетрики на тестовой выборке:")
+    print(f"MSE: {metrics.get('test_mse', 0):.6f}")
+    print(f"RMSE: {metrics.get('test_rmse', 0):.6f}")
+    print(f"MAE: {metrics.get('test_mae', 0):.6f}")
+    print(f"R²: {metrics.get('test_r2', 0):.6f}")
+    print(f"MAPE: {metrics.get('test_mape', 0):.2f}")
+    print(f"Direction Accuracy: {metrics.get('test_direction_accuracy', 0):.2f}")
+
+    print("\nМетрики на тренировочной выборке:")
+    print(f"MSE: {metrics.get('train_mse', 0):.6f}")
+    print(f"RMSE: {metrics.get('train_rmse', 0):.6f}")
+    print(f"MAE: {metrics.get('train_mae', 0):.6f}")
+    print(f"R²: {metrics.get('train_r2', 0):.6f}")
+
+    # Важность признаков
+    feature_imp = model.get_feature_importance()
+    if feature_imp is not None:
+        print("\nВажность признаков (топ-10):")
+        print(feature_imp.head(10).to_string(index=False))
+
+    # Прогноз
+    print("\n" + "=" * 50)
+    print("ПРОГНОЗ НА СЛЕДУЮЩИЙ ВРЕМЕННОЙ ИНТЕРВАЛ")
+    print("=" * 50)
+
+    prediction = model.predict_next(df)
 
     print(f"Текущая цена: {prediction['current_price']:.4f}")
     print(f"Прогнозируемая цена: {prediction['predicted_price']:.4f}")
-    print(f"Ожидаемое изменение: {prediction['price_change_pct']:.2f}%")
+    print(f"Ожидаемое изменение: {prediction['expected_change']:.2f}%")
     print(f"Торговый сигнал: {prediction['signal']}")
-    print("\nРетроспективная оценка торговых сигналов:")
-    # Фильтруем NaN значения
-    valid_mask = ~np.isnan(y_test)
-    y_test_valid = y_test[valid_mask]
-    predictions_valid = predictions[valid_mask]
 
-    if len(y_test_valid) > 1:
-        y_test_shifted = y_test_valid.shift(1).fillna(y_test_valid.iloc[0])
-        signals = np.sign(np.clip(predictions_valid - y_test_shifted, -1e10, 1e10))
-        actual_returns = y_test_valid.pct_change().fillna(0)
-        strategy_returns = signals[:-1] * actual_returns[1:].values
-        cumulative_returns = (1 + strategy_returns).cumprod() - 1
-        total_trades = np.sum(np.abs(np.diff(signals)) > 0) + 1
-        profitable_trades = np.sum(strategy_returns > 0)
-        profit_sum = np.sum(strategy_returns[strategy_returns > 0])
-        loss_sum = abs(np.sum(strategy_returns[strategy_returns < 0]))
-        profit_factor = profit_sum / loss_sum if loss_sum > 0 else float("inf")
+    # Backtest
+    print("\n" + "=" * 50)
+    print("РЕТРОСПЕКТИВНАЯ ОЦЕНКА ТОРГОВЫХ СИГНАЛОВ")
+    print("=" * 50)
 
-        print(f"Всего сделок: {total_trades}")
-        print(
-            f"Прибыльных сделок: {profitable_trades} ({profitable_trades / total_trades * 100:.2f}% от общего числа)"
-        )
-        print(f"Общая доходность: {cumulative_returns.iloc[-1] * 100:.2f}%")
-        print(f"Коэффициент прибыли (Profit Factor): {profit_factor:.2f}")
-    else:
-        print("Недостаточно данных для оценки эффективности торговых сигналов")
-    return model, df_features
+    _run_backtest(model, df)
+
+    return model
+
+
+def _run_backtest(model: XGBoostTradeModelNew, df: pd.DataFrame):
+    """Run simple backtest on test data."""
+    df_features = model.prepare_features(df)
+    test_size = int(len(df_features) * 0.2)
+
+    if test_size < 2:
+        print("Недостаточно данных для бэктеста")
+        return
+
+    test_df = df_features.iloc[-test_size:]
+    X_test = test_df[model.feature_columns]
+    X_test_scaled = model.scaler.transform(X_test)
+    predictions = model._predict(X_test_scaled)
+
+    y_test = test_df['next_close'].values
+    current_prices = test_df['close'].values
+    signals = np.sign(predictions - current_prices)
+    actual_returns = np.diff(y_test) / y_test[:-1]
+    strategy_returns = signals[:-1] * actual_returns
+
+    cumulative_returns = (1 + strategy_returns).cumprod() - 1
+    total_trades = np.sum(np.abs(np.diff(signals)) > 0) + 1
+    profitable_trades = np.sum(strategy_returns > 0)
+
+    profit_sum = np.sum(strategy_returns[strategy_returns > 0])
+    loss_sum = abs(np.sum(strategy_returns[strategy_returns < 0]))
+    profit_factor = profit_sum / loss_sum if loss_sum > 0 else float('inf')
+
+    print(f"Всего сделок: {total_trades}")
+    print(f"Прибыльных сделок: {profitable_trades} ({profitable_trades / total_trades * 100:.2f}%)")
+    print(f"Общая доходность: {cumulative_returns[-1] * 100:.2f}%")
+    print(f"Коэффициент прибыли (Profit Factor): {profit_factor:.2f}")
 
 
 if __name__ == "__main__":

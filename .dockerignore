@@ -1,5 +1,5 @@
 .venv
-.venv_310
+.venv_310/
 __pycache__/
 *.py[cod]
 *$py.class

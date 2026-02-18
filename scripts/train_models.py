@@ -120,26 +120,49 @@ def get_available_tickers(engine) -> List[str]:
 
 def extract_metrics(output_text: str) -> Dict[str, Any]:
     """Extract metrics from model output text."""
+    # Паттерны для извлечения метрик из текстового вывода модели
     patterns = {
+        # Test metrics
         'test_mse': r'MSE: ([\d.]+)',
         'test_rmse': r'RMSE: ([\d.]+)',
         'test_mae': r'MAE: ([\d.]+)',
         'test_r2': r'R²: ([\d.]+)',
         'test_mape': r'MAPE: ([\d.]+)',
         'test_direction_accuracy': r'Direction Accuracy: ([\d.]+)',
+
+        # Predictions
         'current_price': r'Текущая цена: ([\d.]+)',
         'predicted_price': r'Прогнозируемая цена: ([\d.]+)',
         'expected_change': r'Ожидаемое изменение: ([-+]?[\d.]+)%',
-        'trading_signal': r'Торговый сигнал: (\w+)'
+        'trading_signal': r'Торговый сигнал: (\w+)',
+
+        # Trading performance (backtest)
+        'total_trades': r'Всего сделок: (\d+)',
+        'profitable_trades': r'Прибыльных сделок: (\d+)',
+        'win_rate': r'Прибыльных сделок: \d+ \(([\d.]+)%',
+        'cumulative_return': r'Общая доходность: ([-+]?[\d.]+)%',
+        'profit_factor': r'Коэффициент прибыли.*?: ([\d.]+|inf)',
+
+        # Dataset info
+        'total_samples': r'Загружено (\d+) записей',
     }
 
     metrics = {}
+
+    # Извлекаем метрики
     for key, pattern in patterns.items():
-        match = re.search(pattern, output_text)
+        match = re.search(pattern, output_text, re.IGNORECASE)
         if match:
             value = match.group(1)
             if key == 'trading_signal':
                 metrics[key] = value.strip()
+            elif key == 'profit_factor' and value == 'inf':
+                metrics[key] = None  # Бесконечный profit factor = нет убыточных сделок
+            elif key in ['total_trades', 'profitable_trades', 'total_samples']:
+                try:
+                    metrics[key] = int(value)
+                except ValueError:
+                    metrics[key] = None
             else:
                 try:
                     metrics[key] = float(value)
@@ -148,7 +171,41 @@ def extract_metrics(output_text: str) -> Dict[str, Any]:
         else:
             metrics[key] = None
 
+    # Извлекаем период данных
+    period_match = re.search(
+        r'за период с (\d{4}-\d{2}-\d{2})[T\s][\d:]+\s+по\s+(\d{4}-\d{2}-\d{2})',
+        output_text
+    )
+    if period_match:
+        metrics['data_start_date'] = period_match.group(1)
+        metrics['data_end_date'] = period_match.group(2)
+    else:
+        metrics['data_start_date'] = None
+        metrics['data_end_date'] = None
+
+    # Рассчитываем train/test samples (80/20 split)
+    if metrics.get('total_samples'):
+        total = metrics.pop('total_samples')
+        metrics['train_samples'] = int(total * 0.8)
+        metrics['test_samples'] = int(total * 0.2)
+    else:
+        metrics['train_samples'] = None
+        metrics['test_samples'] = None
+
     return metrics
+
+
+def get_ticker_name(engine, figi: str) -> Optional[str]:
+    """Get human-readable ticker name from FIGI."""
+    try:
+        with engine.connect() as conn:
+            result = conn.execute(text(
+                "SELECT ticker FROM public.tickers WHERE figi = :figi"
+            ), {'figi': figi})
+            row = result.fetchone()
+            return row[0] if row else None
+    except Exception:
+        return None
 
 
 def save_result(engine, ticker: str, model_name: str, output_text: str) -> bool:
@@ -157,24 +214,34 @@ def save_result(engine, ticker: str, model_name: str, output_text: str) -> bool:
         metrics = extract_metrics(output_text)
         timestamp = datetime.now()
 
+        # Get human-readable ticker name
+        ticker_name = get_ticker_name(engine, ticker)
+
         Session = sessionmaker(bind=engine)
         session = Session()
 
-        # Insert using raw SQL for simplicity
+        # Insert with all new columns
         session.execute(text("""
             INSERT INTO public.model_results (
-                db_name, model_name, timestamp, text,
+                db_name, ticker_name, model_name, timestamp, text,
+                train_samples, test_samples, data_start_date, data_end_date,
                 test_mse, test_rmse, test_mae, test_r2, test_mape,
                 test_direction_accuracy, current_price, predicted_price,
-                expected_change, trading_signal
+                expected_change, trading_signal,
+                total_trades, profitable_trades, win_rate,
+                profit_factor, cumulative_return
             ) VALUES (
-                :db_name, :model_name, :timestamp, :text,
+                :db_name, :ticker_name, :model_name, :timestamp, :text,
+                :train_samples, :test_samples, :data_start_date, :data_end_date,
                 :test_mse, :test_rmse, :test_mae, :test_r2, :test_mape,
                 :test_direction_accuracy, :current_price, :predicted_price,
-                :expected_change, :trading_signal
+                :expected_change, :trading_signal,
+                :total_trades, :profitable_trades, :win_rate,
+                :profit_factor, :cumulative_return
             )
         """), {
             'db_name': ticker,
+            'ticker_name': ticker_name,
             'model_name': model_name,
             'timestamp': timestamp,
             'text': output_text,
@@ -184,7 +251,11 @@ def save_result(engine, ticker: str, model_name: str, output_text: str) -> bool:
         session.commit()
         session.close()
 
-        logger.info(f"  Saved result: {model_name} / {ticker}")
+        # Log with signal and key metrics
+        signal = metrics.get('trading_signal', 'N/A')
+        r2 = metrics.get('test_r2')
+        r2_str = f"R²={r2:.3f}" if r2 else ""
+        logger.info(f"  Saved: {ticker_name or ticker} | {signal} | {r2_str}")
         return True
 
     except Exception as e:

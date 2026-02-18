@@ -651,17 +651,49 @@ async def predict_stock_with_arima(db_path, visualize=True, seasonal_analysis=Fa
         print(f"Fatal error in prediction pipeline: {e}")
         return {'error': str(e)}
 
+# Synchronous wrapper for train_models.py compatibility
+def main(db_path):
+    """
+    Synchronous wrapper for ARIMA prediction.
+
+    This function is called by train_models.py to maintain consistency
+    with other models.
+
+    ARIMA model doesn't have the same data leakage issue as ML models
+    because it doesn't use a scaler - it works directly with the time series.
+    """
+    result = asyncio.run(predict_stock_with_arima(db_path=db_path, visualize=False))
+
+    # Print results in format compatible with train_models.py metric extraction
+    if 'error' not in result or result.get('prediction'):
+        pred = result.get('prediction', {})
+        metrics = result.get('metrics', {})
+
+        print(f"\nТекущая цена: {pred.get('last_price', 0):.4f}")
+        print(f"Прогнозируемая цена: {pred.get('price', 0):.4f}")
+        print(f"Ожидаемое изменение: {pred.get('change_percent', 0):.2f}%")
+        print(f"Торговый сигнал: {pred.get('signal', 'NEUTRAL')}")
+
+        if metrics:
+            print(f"\nМетрики модели:")
+            if metrics.get('mae') is not None:
+                print(f"MAE: {metrics['mae']:.6f}")
+            if metrics.get('rmse') is not None:
+                print(f"RMSE: {metrics['rmse']:.6f}")
+            if metrics.get('mape') is not None:
+                print(f"MAPE: {metrics['mape']:.2f}")
+            if metrics.get('directional_accuracy') is not None:
+                print(f"Direction Accuracy: {metrics['directional_accuracy']:.2f}")
+
+    return result
+
+
 # Run the prediction function if script is executed directly
 if __name__ == "__main__":
     import time
 
     start_time = time.time()
-    result = asyncio.run(predict_stock_with_arima(db_path="BBG000Q7ZZY2", visualize=False))
+    result = main("BBG000Q7ZZY2")
     end_time = time.time()
 
     print(f"\nPrediction completed in {end_time - start_time:.2f} seconds")
-
-    # Save results to file (optional)
-    # import json
-    # with open('stock_prediction_result.json', 'w') as f:
-    #     json.dump(result, f, indent=4)

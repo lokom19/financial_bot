@@ -54,9 +54,16 @@ def setup_database():
                 CREATE TABLE IF NOT EXISTS public.model_results (
                     id SERIAL PRIMARY KEY,
                     db_name VARCHAR(255) NOT NULL,
+                    ticker_name VARCHAR(50),
                     model_name VARCHAR(255) NOT NULL,
                     timestamp TIMESTAMP NOT NULL,
                     text TEXT NOT NULL,
+
+                    -- Dataset info
+                    train_samples INTEGER,
+                    test_samples INTEGER,
+                    data_start_date DATE,
+                    data_end_date DATE,
 
                     -- Test metrics
                     test_mse FLOAT,
@@ -67,17 +74,59 @@ def setup_database():
                     test_direction_accuracy FLOAT,
 
                     -- Train metrics
+                    train_mse FLOAT,
+                    train_rmse FLOAT,
+                    train_mae FLOAT,
+                    train_r2 FLOAT,
                     train_direction_accuracy FLOAT,
 
                     -- Predictions
                     current_price FLOAT,
                     predicted_price FLOAT,
                     expected_change FLOAT,
-                    trading_signal VARCHAR(10)
+                    prediction_std FLOAT,
+                    trading_signal VARCHAR(10),
+
+                    -- Trading performance (backtest)
+                    total_trades INTEGER,
+                    profitable_trades INTEGER,
+                    win_rate FLOAT,
+                    profit_factor FLOAT,
+                    cumulative_return FLOAT
                 );
             """))
             conn.commit()
             print("   ✓ Table created: public.model_results")
+
+            # Add new columns if they don't exist (migration for existing tables)
+            print("\n2.1. Adding new columns (if missing)...")
+            new_columns = [
+                ("ticker_name", "VARCHAR(50)"),
+                ("train_samples", "INTEGER"),
+                ("test_samples", "INTEGER"),
+                ("data_start_date", "DATE"),
+                ("data_end_date", "DATE"),
+                ("train_mse", "FLOAT"),
+                ("train_rmse", "FLOAT"),
+                ("train_mae", "FLOAT"),
+                ("train_r2", "FLOAT"),
+                ("prediction_std", "FLOAT"),
+                ("total_trades", "INTEGER"),
+                ("profitable_trades", "INTEGER"),
+                ("win_rate", "FLOAT"),
+                ("profit_factor", "FLOAT"),
+                ("cumulative_return", "FLOAT"),
+            ]
+            for col_name, col_type in new_columns:
+                try:
+                    conn.execute(text(f"""
+                        ALTER TABLE public.model_results
+                        ADD COLUMN IF NOT EXISTS {col_name} {col_type};
+                    """))
+                except Exception:
+                    pass  # Column might already exist
+            conn.commit()
+            print("   ✓ New columns added")
 
             # Create indexes
             print("\n3. Creating indexes...")

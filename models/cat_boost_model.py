@@ -561,132 +561,126 @@ class CatBoostTradeModel:
 
 # Основная функция
 def main(db_path):
-    # Загружаем данные
-    print("Загрузка данных...")
+    """
+    Main training function using the new CatBoostTradeModelNew.
 
+    This implementation:
+    - Uses core modules for proper data handling
+    - Avoids data leakage (scaler fitted only on training data)
+    - Provides comprehensive output for metrics parsing
+    """
+    print("Загрузка данных...")
     df = load_data(db_path)
-    # df = load_crypto_data(db_path)
-    #
-    # df["timestamp"] = df["open_time"]
-    # df = df.drop(["open_time"], axis=1)
-    # df = df.drop(["close_time"], axis=1)
-    try:
-        df = df.drop(["figi"], axis=1)
-    except KeyError:
-        pass  # Column doesn't exist
+
+    if 'figi' in df.columns:
+        df = df.drop(['figi'], axis=1)
+
     print(df.tail(3))
     print(
-        f"Загружено {len(df)} записей за период с {df['timestamp'].min() if not df.empty else 'N/A'} по {df['timestamp'].max() if not df.empty else 'N/A'}")
-
-    # Проверка на пустой DataFrame
-    if df.empty:
-        print(f"ОШИБКА: Файл {db_path} не содержит данных. Пропускаем обработку.")
-        return None, None
-
-    # Создаем признаки
-    print("\nСоздание признаков...")
-    df_features = create_features(df)
-    print(f"Создано признаков: {len(df_features.columns) - 2}")  # -2 для timestamp и next_close
-
-    # Проверка на пустой DataFrame после создания признаков
-    if df_features.empty:
-        print(
-            f"ОШИБКА: После создания признаков для {db_path} не осталось данных (возможно, из-за NaN). Пропускаем обработку.")
-        return None, None
-
-    # Информация о признаках
-    print("\nСтатистика признаков:")
-    print(df_features.describe().T[['mean', 'min', 'max', 'std']])
-
-    # Проверка на бесконечные значения
-    inf_check = np.isinf(df_features.select_dtypes(include=[np.number])).sum().sum()
-    if inf_check > 0:
-        print(f"ВНИМАНИЕ: обнаружено {inf_check} бесконечных значений. Они будут обработаны.")
-
-    # Создаем и обучаем модель CatBoost
-    print("\nОбучение CatBoost модели...")
-    model = CatBoostTradeModel(
-        iterations=1500,
-        learning_rate=0.03,
-        depth=12,
-        l2_leaf_reg=3.0
+        f"Загружено {len(df)} записей за период с {df['timestamp'].min() if not df.empty else 'N/A'} "
+        f"по {df['timestamp'].max() if not df.empty else 'N/A'}"
     )
-    X, y, timestamps = model.prepare_data(df_features)
 
-    # Проверка на пустые данные после подготовки
-    if X.shape[0] == 0:
-        print(f"ОШИБКА: После подготовки данных для {db_path} не осталось записей для обучения.")
-        return None, None
+    if df.empty or len(df) < 50:
+        print(f"ОШИБКА: Недостаточно данных для {db_path}. Минимум 50 записей.")
+        return None
 
-    X_test, y_test, predictions, test_metrics = model.train(X, y, timestamps, df_features)
+    print("\nОбучение модели CatBoost...")
+    print("ВАЖНО: Scaler обучается ТОЛЬКО на тренировочных данных (без data leakage)")
 
-    # Выводим важность признаков
-    print("\nВажность признаков (топ-10):")
-    print(model.get_feature_importance(10))
+    model = CatBoostTradeModelNew(params={
+        'iterations': 300,
+        'learning_rate': 0.05,
+        'depth': 6,
+        'loss_function': 'RMSE',
+        'verbose': False
+    })
 
-    # Выводим последние 5 предсказаний и реальные значения
-    print("\nПоследние 5 предсказаний:")
-    last_indices = range(len(y_test) - 5, len(y_test))
-    for i in last_indices:
-        real_price = y_test.iloc[i]
-        pred_price = predictions[i]
-        error_pct = (pred_price - real_price) / real_price * 100 if not np.isnan(
-            real_price) and real_price != 0 else float('nan')
-        print(
-            f"Реальная цена next_close: {real_price:.4f}, Предсказанная цена next_close: {pred_price:.4f}, Ошибка: {error_pct:.2f}%")
+    try:
+        metrics = model.train(df)
+    except Exception as e:
+        print(f"ОШИБКА при обучении: {e}")
+        return None
 
-    # Предсказываем цену на следующий временной интервал
-    print("\nПрогноз на следующий временной интервал:")
+    # Выводим метрики
+    print("\n" + "=" * 50)
+    print("МЕТРИКИ МОДЕЛИ")
+    print("=" * 50)
 
-    # Берем последнюю строку из оригинального датасета
-    latest_row = df.iloc[-1:].copy()
+    print("\nМетрики на тестовой выборке:")
+    print(f"MSE: {metrics.get('test_mse', 0):.6f}")
+    print(f"RMSE: {metrics.get('test_rmse', 0):.6f}")
+    print(f"MAE: {metrics.get('test_mae', 0):.6f}")
+    print(f"R²: {metrics.get('test_r2', 0):.6f}")
+    print(f"MAPE: {metrics.get('test_mape', 0):.2f}")
+    print(f"Direction Accuracy: {metrics.get('test_direction_accuracy', 0):.2f}")
 
-    # Создаем признаки только для этой строки
-    latest_features = create_features(
-        pd.concat([df.iloc[-30:].iloc[:-1], latest_row])
-    )  # Берем предыдущие 30 дней для расчета индикаторов
-    latest_features = latest_features.iloc[-1:].copy()  # Оставляем только последнюю строку с рассчитанными признаками
+    print("\nМетрики на тренировочной выборке:")
+    print(f"MSE: {metrics.get('train_mse', 0):.6f}")
+    print(f"RMSE: {metrics.get('train_rmse', 0):.6f}")
+    print(f"MAE: {metrics.get('train_mae', 0):.6f}")
+    print(f"R²: {metrics.get('train_r2', 0):.6f}")
 
-    # Если в latest_features есть NaN в next_close, заменяем его на 0 или другое значение
-    if 'next_close' in latest_features.columns and latest_features['next_close'].isna().any():
-        latest_features['next_close'] = 0  # или другое подходящее значение
+    # Важность признаков
+    feature_imp = model.get_feature_importance()
+    if feature_imp is not None:
+        print("\nВажность признаков (топ-10):")
+        print(feature_imp.head(10).to_string(index=False))
 
-    print(latest_features)
-    prediction = model.predict_next(latest_features)
+    # Прогноз
+    print("\n" + "=" * 50)
+    print("ПРОГНОЗ НА СЛЕДУЮЩИЙ ВРЕМЕННОЙ ИНТЕРВАЛ")
+    print("=" * 50)
+
+    prediction = model.predict_next(df)
 
     print(f"Текущая цена: {prediction['current_price']:.4f}")
     print(f"Прогнозируемая цена: {prediction['predicted_price']:.4f}")
-    print(f"Ожидаемое изменение: {prediction['price_change_pct']:.2f}%")
+    print(f"Ожидаемое изменение: {prediction['expected_change']:.2f}%")
     print(f"Торговый сигнал: {prediction['signal']}")
-    print(f"Доверительность прогноза: {prediction['confidence']:.2f}")
 
-    # Оценка эффективности торговых сигналов
-    print("\nРетроспективная оценка торговых сигналов:")
-    # Фильтруем NaN значения
-    valid_mask = ~np.isnan(y_test)
-    y_test_valid = y_test[valid_mask]
-    predictions_valid = predictions[valid_mask]
+    # Backtest
+    print("\n" + "=" * 50)
+    print("РЕТРОСПЕКТИВНАЯ ОЦЕНКА ТОРГОВЫХ СИГНАЛОВ")
+    print("=" * 50)
 
-    if len(y_test_valid) > 1:
-        y_test_shifted = y_test_valid.shift(1).fillna(y_test_valid.iloc[0])
-        signals = np.sign(np.clip(predictions_valid - y_test_shifted, -1e10, 1e10))
-        actual_returns = y_test_valid.pct_change().fillna(0)
-        strategy_returns = signals[:-1] * actual_returns[1:].values
-        cumulative_returns = (1 + strategy_returns).cumprod() - 1
-        total_trades = np.sum(np.abs(np.diff(signals)) > 0) + 1
-        profitable_trades = np.sum(strategy_returns > 0)
-        profit_sum = np.sum(strategy_returns[strategy_returns > 0])
-        loss_sum = abs(np.sum(strategy_returns[strategy_returns < 0]))
-        profit_factor = profit_sum / loss_sum if loss_sum > 0 else float('inf')
+    _run_backtest(model, df)
 
-        print(f"Всего сделок: {total_trades}")
-        print(f"Прибыльных сделок: {profitable_trades} ({profitable_trades / total_trades * 100:.2f}% от общего числа)")
-        print(f"Общая доходность: {cumulative_returns.iloc[-1] * 100:.2f}%")
-        print(f"Коэффициент прибыли (Profit Factor): {profit_factor:.2f}")
-    else:
-        print("Недостаточно данных для оценки эффективности торговых сигналов")
+    return model
 
-    return model, df_features
+
+def _run_backtest(model: CatBoostTradeModelNew, df: pd.DataFrame):
+    """Run simple backtest on test data."""
+    df_features = model.prepare_features(df)
+    test_size = int(len(df_features) * 0.2)
+
+    if test_size < 2:
+        print("Недостаточно данных для бэктеста")
+        return
+
+    test_df = df_features.iloc[-test_size:]
+    X_test = test_df[model.feature_columns]
+    X_test_scaled = model.scaler.transform(X_test)
+    predictions = model._predict(X_test_scaled)
+
+    y_test = test_df['next_close'].values
+    current_prices = test_df['close'].values
+    signals = np.sign(predictions - current_prices)
+    actual_returns = np.diff(y_test) / y_test[:-1]
+    strategy_returns = signals[:-1] * actual_returns
+
+    cumulative_returns = (1 + strategy_returns).cumprod() - 1
+    total_trades = np.sum(np.abs(np.diff(signals)) > 0) + 1
+    profitable_trades = np.sum(strategy_returns > 0)
+
+    profit_sum = np.sum(strategy_returns[strategy_returns > 0])
+    loss_sum = abs(np.sum(strategy_returns[strategy_returns < 0]))
+    profit_factor = profit_sum / loss_sum if loss_sum > 0 else float('inf')
+
+    print(f"Всего сделок: {total_trades}")
+    print(f"Прибыльных сделок: {profitable_trades} ({profitable_trades / total_trades * 100:.2f}%)")
+    print(f"Общая доходность: {cumulative_returns[-1] * 100:.2f}%")
+    print(f"Коэффициент прибыли (Profit Factor): {profit_factor:.2f}")
 
 
 if __name__ == "__main__":
