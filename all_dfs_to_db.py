@@ -11,9 +11,9 @@ from dotenv import load_dotenv
 from grpc import StatusCode
 from grpc.aio._call import AioRpcError
 from sqlalchemy import create_engine, text
-from tinkoff.invest import AsyncClient, CandleInterval, RequestError, AioRequestError
-from tinkoff.invest.schemas import CandleSource
-from tinkoff.invest.utils import now
+from t_tech.invest import AsyncClient, CandleInterval, RequestError, AioRequestError
+from t_tech.invest.schemas import CandleSource
+from t_tech.invest.utils import now
 
 from get_all_tinkoff_figi import get_tickers_from_bd
 

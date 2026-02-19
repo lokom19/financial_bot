@@ -232,7 +232,45 @@ python scripts/train_models.py --model ridge --model xgboost --ticker BBG000Q7ZZ
 python scripts/train_models.py --dry-run
 ```
 
+### Автоматический Pipeline (Scheduler)
+
+Встроенный планировщик для автоматического сбора данных и обучения моделей.
+
+```bash
+# Запуск каждые 3 минуты (по умолчанию)
+make scheduler
+
+# Запуск каждые 5 минут
+make scheduler SCHEDULER_INTERVAL=5
+
+# Запуск в фоновом режиме
+make scheduler-bg
+
+# Остановить фоновый scheduler
+make scheduler-stop
+
+# Посмотреть логи
+make scheduler-logs
+
+# Однократный запуск pipeline
+make pipeline-once
+```
+
+**Параметры scheduler:**
+
+| Параметр | По умолчанию | Описание |
+|----------|--------------|----------|
+| `SCHEDULER_INTERVAL` | 3 | Интервал в минутах |
+| `SCHEDULER_DAYS` | 30 | Дней исторических данных |
+
+**Что делает scheduler:**
+1. Собирает данные с Tinkoff API (`all_dfs_to_db.py`)
+2. Обучает все модели (`scripts/train_models.py`)
+3. Повторяет через заданный интервал
+
 ### Периодическое обучение (cron)
+
+Альтернативный способ через cron:
 
 ```bash
 # Каждый день в 6:00

@@ -94,6 +94,38 @@ data-status:
 	@python -c "from sqlalchemy import create_engine, text; import os; from dotenv import load_dotenv; load_dotenv(); e=create_engine(f\"postgresql://{os.getenv('DB_USER')}:{os.getenv('DB_PASSWORD')}@{os.getenv('DB_HOST')}:{os.getenv('DB_PORT')}/{os.getenv('DB_NAME')}\"); print(e.connect().execute(text(\"SELECT COUNT(*) FROM information_schema.tables WHERE table_schema='all_dfs'\")).scalar(), 'data tables')" 2>/dev/null || echo "No data tables"
 
 # ============================================================
+# SCHEDULER (Automated Pipeline)
+# ============================================================
+
+# Default scheduler settings
+SCHEDULER_INTERVAL ?= 3
+SCHEDULER_DAYS ?= 30
+
+# Run scheduler (data collection + training every N minutes)
+scheduler:
+	@echo "Starting scheduler (interval: $(SCHEDULER_INTERVAL) min, days: $(SCHEDULER_DAYS))..."
+	python scripts/scheduler.py --interval $(SCHEDULER_INTERVAL) --days $(SCHEDULER_DAYS)
+
+# Run pipeline once (no scheduling)
+pipeline-once:
+	python scripts/scheduler.py --once --days $(SCHEDULER_DAYS)
+
+# Run scheduler in background
+scheduler-bg:
+	@echo "Starting scheduler in background..."
+	nohup python scripts/scheduler.py --interval $(SCHEDULER_INTERVAL) --days $(SCHEDULER_DAYS) > scheduler.log 2>&1 &
+	@echo "✓ Scheduler started. Logs: scheduler.log"
+	@echo "  Stop with: make scheduler-stop"
+
+# Stop background scheduler
+scheduler-stop:
+	@pkill -f "python scripts/scheduler.py" && echo "✓ Scheduler stopped" || echo "Scheduler not running"
+
+# View scheduler logs
+scheduler-logs:
+	@tail -f scheduler.log 2>/dev/null || echo "No scheduler.log found"
+
+# ============================================================
 # TRAINING
 # ============================================================
 
@@ -203,6 +235,14 @@ help:
 	@echo "    make fetch-candles INTERVAL=hour  - Fetch hourly candles"
 	@echo "    make data-status             - Check data collection status"
 	@echo "    Intervals: 1min, 5min, 15min, hour, day, week, month"
+	@echo ""
+	@echo "  SCHEDULER (Automated Pipeline):"
+	@echo "    make scheduler                   - Run pipeline every 3 min (foreground)"
+	@echo "    make scheduler SCHEDULER_INTERVAL=5  - Run every 5 minutes"
+	@echo "    make scheduler-bg                - Run scheduler in background"
+	@echo "    make scheduler-stop              - Stop background scheduler"
+	@echo "    make scheduler-logs              - View scheduler logs"
+	@echo "    make pipeline-once               - Run pipeline once and exit"
 	@echo ""
 	@echo "  SERVER:"
 	@echo "    make server        - Run development server (port 8000)"

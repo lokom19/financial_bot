@@ -25,25 +25,68 @@ services:
   # ============================================================
   # FastAPI Application
   # ============================================================
-  # app:
-  #   build: .
-  #   container_name: arima_app
-  #   ports:
-  #     - "8000:8000"
-  #   environment:
-  #     - DB_HOST=postgres
-  #     - DB_PORT=5432
-  #     - DB_NAME=${DB_NAME:-postgres}
-  #     - DB_USER=${DB_USER:-postgres}
-  #     - DB_PASSWORD=${DB_PASSWORD:-postgres}
-  #   volumes:
-  #     - ./templates:/app/templates
-  #     - ./static:/app/static
-  #     - ./output:/app/output
-  #   depends_on:
-  #     postgres:
-  #       condition: service_healthy
-  #   restart: unless-stopped
+  app:
+    build: .
+    container_name: arima_app
+    ports:
+      - "8000:8000"
+    environment:
+      - DB_HOST=postgres
+      - DB_PORT=5432
+      - DB_NAME=${DB_NAME:-postgres}
+      - DB_USER=${DB_USER:-postgres}
+      - DB_PASSWORD=${DB_PASSWORD:-postgres}
+    volumes:
+      - ./templates:/app/templates
+      - ./static:/app/static
+      - ./output:/app/output
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # ============================================================
+  # Scheduler (Data Collection + Training)
+  # ============================================================
+  scheduler:
+    build: .
+    container_name: arima_scheduler
+    command: >
+      python scripts/scheduler.py
+      --interval ${SCHEDULER_INTERVAL:-3}
+      --days ${SCHEDULER_DAYS:-2000}
+    environment:
+      - DB_HOST=postgres
+      - DB_PORT=5432
+      - DB_NAME=${DB_NAME:-postgres}
+      - DB_USER=${DB_USER:-postgres}
+      - DB_PASSWORD=${DB_PASSWORD:-postgres}
+      - INVEST_TOKEN=${INVEST_TOKEN}
+      - LOG_TO_FILE=false
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # ============================================================
+  # Streamlit Dashboard
+  # ============================================================
+  dashboard:
+    build: .
+    container_name: arima_dashboard
+    command: streamlit run streamlit_app/app.py --server.port 8501 --server.address 0.0.0.0
+    ports:
+      - "8501:8501"
+    environment:
+      - DB_HOST=postgres
+      - DB_PORT=5432
+      - DB_NAME=${DB_NAME:-postgres}
+      - DB_USER=${DB_USER:-postgres}
+      - DB_PASSWORD=${DB_PASSWORD:-postgres}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
 
 volumes:
   postgres_data:

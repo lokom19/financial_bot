@@ -3,9 +3,9 @@ import os
 import time
 from pandas import DataFrame
 from dotenv import load_dotenv
-from tinkoff.invest import Client, SecurityTradingStatus, RequestError
-from tinkoff.invest.services import InstrumentsService
-from tinkoff.invest.utils import quotation_to_decimal
+from t_tech.invest import Client, SecurityTradingStatus, RequestError
+from t_tech.invest.services import InstrumentsService
+from t_tech.invest.utils import quotation_to_decimal
 from sqlalchemy import create_engine
 
 load_dotenv()
