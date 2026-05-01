@@ -747,10 +747,22 @@ def main(db_path):
         loss_sum = abs(np.sum(eval_df['strategy_return'][eval_df['strategy_return'] < 0]))
         profit_factor = profit_sum / loss_sum if loss_sum > 0 else float('inf')
 
+        # Sharpe Ratio (annualized)
+        sr = eval_df['strategy_return'].dropna()
+        sharpe_ratio = sr.mean() / (sr.std() + 1e-9) * np.sqrt(252)
+
+        # Max Drawdown
+        equity_curve = (1 + sr).cumprod()
+        peak = equity_curve.cummax()
+        drawdowns = (peak - equity_curve) / peak
+        max_drawdown = drawdowns.max() if len(drawdowns) > 0 else 0
+
         print(f"Всего сделок: {total_trades}")
         print(f"Прибыльных сделок: {profitable_trades} ({profitable_trades / total_trades * 100:.2f}% от общего числа)")
         print(f"Общая доходность: {eval_df['cumulative_return'].iloc[-1] * 100:.2f}%")
         print(f"Коэффициент прибыли (Profit Factor): {profit_factor:.2f}")
+        print(f"Sharpe Ratio: {sharpe_ratio:.4f}")
+        print(f"Максимальная просадка: {max_drawdown * 100:.2f}%")
 
     return model, df_features
 

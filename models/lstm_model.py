@@ -650,10 +650,24 @@ def main(db_path):
         loss_sum = abs(np.sum(strategy_returns[strategy_returns < 0]))
         profit_factor = profit_sum / loss_sum if loss_sum > 0 else float('inf')
 
+        # Sharpe Ratio (annualized) — filter NaN
+        clean_returns = strategy_returns[~np.isnan(strategy_returns)]
+        if len(clean_returns) > 1:
+            sharpe_ratio = np.mean(clean_returns) / (np.std(clean_returns) + 1e-9) * np.sqrt(252)
+            equity_curve = (1 + clean_returns).cumprod()
+            peak = np.maximum.accumulate(equity_curve)
+            drawdowns = (peak - equity_curve) / peak
+            max_drawdown = np.max(drawdowns)
+        else:
+            sharpe_ratio = 0.0
+            max_drawdown = 0.0
+
         print(f"Всего сделок: {total_trades}")
         print(f"Прибыльных сделок: {profitable_trades} ({profitable_trades / total_trades * 100:.2f}% от общего числа)")
         print(f"Общая доходность: {cumulative_returns.iloc[-1] * 100:.2f}%")
         print(f"Коэффициент прибыли (Profit Factor): {profit_factor:.2f}")
+        print(f"Sharpe Ratio: {sharpe_ratio:.4f}")
+        print(f"Максимальная просадка: {max_drawdown * 100:.2f}%")
     else:
         print("Недостаточно данных для оценки эффективности торговых сигналов")
 

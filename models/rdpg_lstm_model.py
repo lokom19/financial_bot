@@ -943,39 +943,37 @@ class RDPGLSTMModel:
 
 # Main function
 def main(db_path):
-    print("\n\n\n\n\nLoading data...")
-    # df = load_data(db_path, db_path.split("/")[2][:-3])
-    # df = load_data(db_path, db_path.split("/")[-1][:-3])
+    print("\n\n\n\n\nЗагрузка данных...")
     df = load_data(db_path)
     df = df.drop(["figi"], axis=1)
     print(
-        f"Loaded {len(df)} records for the period from {df['timestamp'].min() if not df.empty else 'N/A'} to {df['timestamp'].max() if not df.empty else 'N/A'}")
+        f"Загружено {len(df)} записей за период с {df['timestamp'].min() if not df.empty else 'N/A'} по {df['timestamp'].max() if not df.empty else 'N/A'}")
 
     if df.empty:
-        print(f"ERROR: File {db_path} does not contain data.")
+        print(f"ОШИБКА: Файл {db_path} не содержит данных.")
         return None, None
 
-    print("\nCreating features...")
+    print("\nСоздание признаков...")
     df_features = create_features(df)
-    print(f"Features created: {len(df_features.columns) - 2}")
+    print(f"Создано признаков: {len(df_features.columns) - 2}")
 
     if df_features.empty:
-        print(f"ERROR: No data left after creating features for {db_path}.")
+        print(f"ОШИБКА: После создания признаков для {db_path} не осталось данных.")
         return None, None
 
-    print("\nFeature statistics:")
+    print("\nСтатистика признаков:")
     print(df_features.describe().T[['mean', 'min', 'max', 'std']])
 
     inf_check = np.isinf(df_features.select_dtypes(include=[np.number])).sum().sum()
     if inf_check > 0:
-        print(f"WARNING: {inf_check} infinite values detected.")
+        print(f"ВНИМАНИЕ: обнаружено {inf_check} бесконечных значений.")
 
-    print("\nTraining RDPG+LSTM model...")
+    print("\nОбучение RDPG+LSTM модели...")
     model = RDPGLSTMModel()
     X_original, X_scaled, y, timestamps = model.prepare_data(df_features)
 
     if X_original.shape[0] == 0:
-        print(f"ERROR: No records left after data preparation for {db_path}.")
+        print(f"ОШИБКА: После подготовки данных для {db_path} не осталось записей.")
         return None, None
 
     X_test, y_test, predictions, test_metrics = model.train(X_original, y, timestamps, X_scaled, df_features)
@@ -983,7 +981,7 @@ def main(db_path):
     if X_test is None:  # Check for training error
         return None, None
 
-    print("\nLast 5 predictions vs actual:")
+    print("\nПоследние 5 предсказаний:")
     if len(predictions) >= 5 and len(y_test) >= 5:
         last_indices = range(len(predictions) - 5, len(predictions))
         for i in last_indices:
@@ -995,7 +993,7 @@ def main(db_path):
                 print(
                     f"Реальная цена next_close: {real_price:.4f}, Предсказанная цена next_close: {pred_price:.4f}, Ошибка: {error_pct:.2f}%")
 
-    print("\nNext trading interval forecast:")
+    print("\nПрогноз на следующий временной интервал:")
 
     # Берем последнюю строку из оригинального датасета
     latest_row = df.iloc[-1:].copy()
@@ -1012,32 +1010,41 @@ def main(db_path):
     prediction = model.predict_next(latest_features)
 
 
-    print(f"Current price: {prediction['current_price']:.4f}")
-    print(f"Predicted price: {prediction['predicted_price']:.4f}")
-    print(f"Expected change: {prediction['price_change_pct']:.2f}%")
+    print(f"Текущая цена: {prediction['current_price']:.4f}")
+    print(f"Прогнозируемая цена: {prediction['predicted_price']:.4f}")
+    print(f"Ожидаемое изменение: {prediction['price_change_pct']:.2f}%")
     print(f"Action value: {prediction['action']:.4f}")
     print(f"Q-value: {prediction['q_value']:.4f}")
-    print(f"Trading signal: {prediction['signal']}")
-    print(f"Confidence: {prediction['confidence']:.2f}")
+    print(f"Торговый сигнал: {prediction['signal']}")
+    print(f"Уверенность в прогнозе: {prediction['confidence']:.2f}")
 
     # Save the model
     model.save_model("rdpg_lstm_model")
 
-    print("\nRunning backtest...")
+    print("\nРетроспективная оценка торговых сигналов:")
     prices = df_features['close'].values
     backtest_results = model.backtest(X_scaled, prices)
 
     if backtest_results:
-        print(f"Final portfolio value: ${backtest_results['final_portfolio_value']:.2f}")
-        print(f"Total return: {backtest_results['total_return'] * 100:.2f}%")
-        print(f"Sharpe ratio: {backtest_results['sharpe_ratio']:.4f}")
-        print(f"Maximum drawdown: {backtest_results['max_drawdown'] * 100:.2f}%")
-        print(f"Total trades: {len(backtest_results['trades'])}")
+        total_trades = len(backtest_results['trades'])
+        print(f"Всего сделок: {total_trades}")
 
         if backtest_results['trade_returns']:
             profitable_trades = sum(1 for r in backtest_results['trade_returns'] if r > 0)
-            total_trades = len(backtest_results['trade_returns'])
-            print(f"Profitable trades: {profitable_trades} ({profitable_trades / total_trades * 100:.2f}%)")
+            print(f"Прибыльных сделок: {profitable_trades} ({profitable_trades / total_trades * 100:.2f}% от общего числа)")
+
+            # Calculate actual Profit Factor
+            trade_returns = backtest_results['trade_returns']
+            profit_sum = sum(r for r in trade_returns if r > 0)
+            loss_sum = abs(sum(r for r in trade_returns if r < 0))
+            profit_factor = profit_sum / loss_sum if loss_sum > 0 else float('inf')
+        else:
+            profit_factor = 0.0
+
+        print(f"Общая доходность: {backtest_results['total_return'] * 100:.2f}%")
+        print(f"Коэффициент прибыли (Profit Factor): {profit_factor:.2f}")
+        print(f"Sharpe Ratio: {backtest_results['sharpe_ratio']:.4f}")
+        print(f"Максимальная просадка: {backtest_results['max_drawdown'] * 100:.2f}%")
 
     return model, df_features
 

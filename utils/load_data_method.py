@@ -42,6 +42,12 @@ DATABASE_URL = f"postgresql://{DB_USER}:{DB_PASSWORD}@{DB_HOST}:{DB_PORT}/{DB_NA
 
 engine = create_engine(DATABASE_URL)
 
+# Override mechanism for walk-forward validation.
+# When train_models.py sets _override_data[ticker] = df,
+# load_data() returns that df instead of querying the database.
+_override_data = {}
+
+
 class FearGreedDataEnhancer:
     """Класс для добавления Fear and Greed Index к финансовым данным"""
 
@@ -177,6 +183,10 @@ def load_data(ticker_name: str, add_fear_greed: bool = True, engine=engine) -> p
     Raises:
         ValueError: If ticker_name fails validation
     """
+    # Walk-forward override: return pre-sliced data if set
+    if ticker_name in _override_data:
+        return _override_data[ticker_name].copy()
+
     # Validate ticker name to prevent SQL injection
     if not validate_table_name(ticker_name):
         raise ValueError(

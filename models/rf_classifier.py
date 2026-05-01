@@ -986,10 +986,23 @@ def _run_classifier_backtest(model: RandomForestClassifierNew):
     loss_sum = abs(np.sum(strategy_returns[strategy_returns < 0]))
     profit_factor = profit_sum / loss_sum if loss_sum > 0 else float('inf')
 
+    # Sharpe Ratio (annualized)
+    if len(strategy_returns) > 1:
+        sharpe_ratio = np.mean(strategy_returns) / (np.std(strategy_returns) + 1e-9) * np.sqrt(252)
+        equity_curve = (1 + strategy_returns).cumprod()
+        peak = np.maximum.accumulate(equity_curve)
+        drawdowns = (peak - equity_curve) / peak
+        max_drawdown = float(np.max(drawdowns))
+    else:
+        sharpe_ratio = 0.0
+        max_drawdown = 0.0
+
     print(f"Всего сделок: {total_trades}")
     print(f"Прибыльных сделок: {profitable_trades} ({profitable_trades / total_trades * 100:.2f}%)")
     print(f"Общая доходность: {cumulative_returns[-1] * 100:.2f}%")
     print(f"Коэффициент прибыли (Profit Factor): {profit_factor:.2f}")
+    print(f"Sharpe Ratio: {sharpe_ratio:.4f}")
+    print(f"Максимальная просадка: {max_drawdown * 100:.2f}%")
 
 
 if __name__ == "__main__":

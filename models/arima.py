@@ -635,7 +635,9 @@ async def predict_stock_with_arima(db_path, visualize=True, seasonal_analysis=Fa
                     'rmse': float(metrics['rmse']) if metrics['rmse'] is not None else None,
                     'mape': float(metrics['mape']) if metrics['mape'] is not None else None,
                     'directional_accuracy': float(metrics['directional_accuracy']) if metrics['directional_accuracy'] is not None else None
-                }
+                },
+                '_forecast_values': forecast.values if hasattr(forecast, 'values') else np.array(forecast),
+                '_test_values': test_data.values if hasattr(test_data, 'values') else np.array(test_data),
             }
 
         except Exception as e:
@@ -684,6 +686,45 @@ def main(db_path):
                 print(f"MAPE: {metrics['mape']:.2f}")
             if metrics.get('directional_accuracy') is not None:
                 print(f"Direction Accuracy: {metrics['directional_accuracy']:.2f}")
+
+        # Backtest: use validation forecast vs test_data for trading signals
+        forecast_vals = result.get('_forecast_values')
+        test_vals = result.get('_test_values')
+        if forecast_vals is not None and test_vals is not None and len(test_vals) > 1:
+            print("\nРетроспективная оценка торговых сигналов:")
+            # Filter NaN values
+            valid_mask = ~np.isnan(forecast_vals) & ~np.isnan(test_vals)
+            forecast_clean = forecast_vals[valid_mask]
+            test_clean = test_vals[valid_mask]
+
+            signals = np.sign(forecast_clean[:-1] - test_clean[:-1])
+            actual_returns = np.diff(test_clean) / test_clean[:-1]
+            strategy_returns = signals * actual_returns
+
+            cumulative_returns = (1 + strategy_returns).cumprod() - 1
+            total_trades = int(np.sum(np.abs(np.diff(signals)) > 0) + 1) if len(signals) > 1 else 1
+            profitable_trades = int(np.sum(strategy_returns > 0))
+
+            profit_sum = np.sum(strategy_returns[strategy_returns > 0])
+            loss_sum = abs(np.sum(strategy_returns[strategy_returns < 0]))
+            profit_factor = profit_sum / loss_sum if loss_sum > 0 else float('inf')
+
+            if len(strategy_returns) > 1:
+                sharpe_ratio = np.mean(strategy_returns) / (np.std(strategy_returns) + 1e-9) * np.sqrt(252)
+                equity_curve = (1 + strategy_returns).cumprod()
+                peak = np.maximum.accumulate(equity_curve)
+                drawdowns = (peak - equity_curve) / peak
+                max_drawdown = float(np.max(drawdowns))
+            else:
+                sharpe_ratio = 0.0
+                max_drawdown = 0.0
+
+            print(f"Всего сделок: {total_trades}")
+            print(f"Прибыльных сделок: {profitable_trades} ({profitable_trades / len(strategy_returns) * 100:.2f}%)")
+            print(f"Общая доходность: {cumulative_returns[-1] * 100:.2f}%")
+            print(f"Коэффициент прибыли (Profit Factor): {profit_factor:.2f}")
+            print(f"Sharpe Ratio: {sharpe_ratio:.4f}")
+            print(f"Максимальная просадка: {max_drawdown * 100:.2f}%")
 
     return result
 

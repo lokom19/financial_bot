@@ -959,24 +959,41 @@ def _run_backtest(model: LightGBMTradeModelNew, df: pd.DataFrame):
     X_test_scaled = model.scaler.transform(X_test)
     predictions = model._predict(X_test_scaled)
 
-    y_test = test_df['next_close'].values
-    current_prices = test_df['close'].values
-    signals = np.sign(predictions - current_prices)
+    # Drop NaN (last row has no next_close)
+    valid_mask = ~np.isnan(test_df['next_close'].values)
+    y_test = test_df['next_close'].values[valid_mask]
+    current_prices = test_df['close'].values[valid_mask]
+    predictions_valid = predictions[valid_mask]
+
+    signals = np.sign(predictions_valid - current_prices)
     actual_returns = np.diff(y_test) / y_test[:-1]
     strategy_returns = signals[:-1] * actual_returns
 
     cumulative_returns = (1 + strategy_returns).cumprod() - 1
-    total_trades = np.sum(np.abs(np.diff(signals)) > 0) + 1
-    profitable_trades = np.sum(strategy_returns > 0)
+    total_trades = int(np.sum(np.abs(np.diff(signals)) > 0) + 1)
+    profitable_trades = int(np.sum(strategy_returns > 0))
 
     profit_sum = np.sum(strategy_returns[strategy_returns > 0])
     loss_sum = abs(np.sum(strategy_returns[strategy_returns < 0]))
     profit_factor = profit_sum / loss_sum if loss_sum > 0 else float('inf')
 
+    # Sharpe Ratio (annualized)
+    if len(strategy_returns) > 1:
+        sharpe_ratio = np.mean(strategy_returns) / (np.std(strategy_returns) + 1e-9) * np.sqrt(252)
+        equity_curve = (1 + strategy_returns).cumprod()
+        peak = np.maximum.accumulate(equity_curve)
+        drawdowns = (peak - equity_curve) / peak
+        max_drawdown = float(np.max(drawdowns))
+    else:
+        sharpe_ratio = 0.0
+        max_drawdown = 0.0
+
     print(f"Всего сделок: {total_trades}")
-    print(f"Прибыльных сделок: {profitable_trades} ({profitable_trades / total_trades * 100:.2f}%)")
+    print(f"Прибыльных сделок: {profitable_trades} ({profitable_trades / len(strategy_returns) * 100:.2f}%)")
     print(f"Общая доходность: {cumulative_returns[-1] * 100:.2f}%")
     print(f"Коэффициент прибыли (Profit Factor): {profit_factor:.2f}")
+    print(f"Sharpe Ratio: {sharpe_ratio:.4f}")
+    print(f"Максимальная просадка: {max_drawdown * 100:.2f}%")
 
 
 if __name__ == "__main__":
