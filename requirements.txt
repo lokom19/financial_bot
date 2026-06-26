@@ -133,3 +133,9 @@ yarl==1.19.0
 yfinance==0.2.61
 APScheduler==3.10.4
 streamlit>=1.30.0
+python-jose[cryptography]>=3.3.0
+passlib[bcrypt]>=1.7.4
+bcrypt==4.0.1
+python-multipart>=0.0.5
+groq>=1.5.0
+arch>=7.0.0

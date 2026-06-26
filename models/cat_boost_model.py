@@ -35,12 +35,15 @@ class CatBoostTradeModelNew(BaseTradeModel):
     def __init__(self, params=None, test_size: float = 0.2, random_state: int = 42):
         super().__init__(test_size=test_size, random_state=random_state)
         self.params = params or {
-            'iterations': 300,
-            'learning_rate': 0.05,
+            'iterations': 600,
+            'learning_rate': 0.04,
             'depth': 6,
+            # L2 регуляризация (дефолт 3.0)
+            'l2_leaf_reg': 4.0,
+            'random_strength': 1.0,
             'loss_function': 'RMSE',
             'random_seed': random_state,
-            'verbose': False
+            'verbose': False,
         }
         self.model = None
 
@@ -49,7 +52,13 @@ class CatBoostTradeModelNew(BaseTradeModel):
 
     def _fit_model(self, X_train, y_train, X_val, y_val):
         self.model = self._create_model()
-        self.model.fit(X_train, y_train, eval_set=(X_val, y_val), verbose=False)
+        # early_stopping_rounds выбирает оптимальное iterations по валидации
+        self.model.fit(
+            X_train, y_train,
+            eval_set=(X_val, y_val),
+            early_stopping_rounds=50,
+            verbose=False,
+        )
         if self.feature_columns:
             self.feature_importances = pd.DataFrame({
                 'Feature': self.feature_columns,

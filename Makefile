@@ -1,4 +1,4 @@
-.PHONY: all setup install db-setup db-check server train train-model help clean docker-build docker-run docker-stop logs fetch-tickers fetch-candles fetch-data fetch-test data-status
+.PHONY: all setup install db-setup db-check server train train-model help clean docker-build docker-run docker-stop logs fetch-tickers fetch-candles fetch-data fetch-test data-status run-all stop-all status-all logs-all
 
 # Default target
 all: help
@@ -32,12 +32,36 @@ db-check:
 	python scripts/setup_db.py --check
 
 # ============================================================
-# SERVER
+# RUN ALL SERVICES (FastAPI + Streamlit, локально в фоне)
+# ============================================================
+
+# Запустить FastAPI + Streamlit в фоне
+run-all:
+	@./scripts/run_all.sh
+
+# Запустить с автообучением (FastAPI + Streamlit + scheduler)
+run-all-full:
+	@./scripts/run_all.sh --with-scheduler
+
+# Остановить все сервисы
+stop-all:
+	@./scripts/run_all.sh --stop
+
+# Статус сервисов
+status-all:
+	@./scripts/run_all.sh --status
+
+# Показать логи всех сервисов
+logs-all:
+	@tail -f logs/*.log
+
+# ============================================================
+# SERVER (отдельно)
 # ============================================================
 
 # Run FastAPI server (development mode with auto-reload)
 server:
-	uvicorn main:app --reload --host 0.0.0.0 --port 8080
+	uvicorn main:app --reload --host 0.0.0.0 --port 8002
 
 # Run FastAPI server (production mode)
 server-prod:
@@ -109,6 +133,55 @@ scheduler:
 # Run pipeline once (no scheduling)
 pipeline-once:
 	python scripts/scheduler.py --once --days $(SCHEDULER_DAYS)
+
+# ============================================================
+# NIGHTLY PIPELINE (top-3 SBER/OZON/VTBR + LLM)
+# ============================================================
+
+NIGHTLY_HOUR ?= 2
+NIGHTLY_MINUTE ?= 0
+
+# Запустить ночной пайплайн ОДИН РАЗ прямо сейчас (для теста)
+nightly-once:
+	@echo "Запуск ночного пайплайна один раз..."
+	python scripts/nightly_pipeline.py
+
+# Запустить ночной пайплайн с walk-forward
+nightly-once-wf:
+	python scripts/nightly_pipeline.py --walk-forward
+
+# Только LLM-валидация по уже существующим записям (без переобучения)
+nightly-llm-only:
+	python scripts/nightly_pipeline.py --skip-training
+
+# Только обучение (без LLM-этапа) — для быстрого теста ML моделей
+nightly-train-only:
+	python scripts/nightly_pipeline.py --skip-llm
+
+# Самый быстрый smoke-test: только ridge + xgboost для SBER
+nightly-smoke:
+	@echo "Smoke-тест: SBER, только ridge + xgboost, без LLM..."
+	@FIGI=$$(psql -h $${DB_HOST:-localhost} -U $${DB_USER:-postgres} -d $${DB_NAME:-postgres} -tAc "SELECT figi FROM public.tickers WHERE ticker='SBER' LIMIT 1"); \
+	python scripts/train_models.py --ticker $$FIGI --model ridge --model xgboost
+
+# Запустить cron-планировщик ночного пайплайна (foreground)
+# По умолчанию срабатывает каждый день в 2:00
+nightly:
+	@echo "Старт ночного планировщика (каждый день в $(NIGHTLY_HOUR):$(NIGHTLY_MINUTE))..."
+	python scripts/scheduler.py --nightly --no-initial \
+		--nightly-hour $(NIGHTLY_HOUR) --nightly-minute $(NIGHTLY_MINUTE)
+
+# Запустить cron-планировщик в фоне
+nightly-bg:
+	@nohup python scripts/scheduler.py --nightly --no-initial \
+		--nightly-hour $(NIGHTLY_HOUR) --nightly-minute $(NIGHTLY_MINUTE) \
+		> logs/nightly.log 2>&1 &
+	@echo "✓ Ночной планировщик запущен в фоне. Логи: logs/nightly.log"
+	@echo "  Стоп: make nightly-stop"
+
+# Остановить фоновый ночной планировщик
+nightly-stop:
+	@pkill -f "scheduler.py --nightly" && echo "✓ Остановлен" || echo "Не запущен"
 
 # Run scheduler in background
 scheduler-bg:

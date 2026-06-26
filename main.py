@@ -3,23 +3,31 @@ import os
 import re
 from collections import defaultdict
 from pathlib import Path
-from typing import Optional
+from typing import Optional, List
 
 import requests
 import uvicorn
 from dotenv import load_dotenv
 from fastapi import FastAPI, Request
 from fastapi import HTTPException
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
+from pydantic import BaseModel
 from sqlalchemy import create_engine
 from sqlalchemy import func
 from sqlalchemy import select
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
-from sqlalchemy.orm import sessionmaker
+from sqlalchemy.orm import sessionmaker, Session
+
 from utils.calculate_weight import calculate_model_score
 from pydantic_models.model_result import ModelResult
+from auth.models import User, Base as AuthBase
+from auth.security import decode_token
+from auth.router import router as auth_router, COOKIE_NAME
+from services.llm_service import analyze_signal, generate_ticker_report
+from services.ta_indicators import compute_ta_indicators
 
 load_dotenv()
 logging.basicConfig(level=logging.INFO,
@@ -35,6 +43,30 @@ DB_PASSWORD = os.getenv("DB_PASSWORD")    # "mysecretpassword"  # Change to your
 DATABASE_URL = f"postgresql://{DB_USER}:{DB_PASSWORD}@{DB_HOST}:{DB_PORT}/{DB_NAME}"
 
 engine = create_engine(DATABASE_URL)
+
+# Sync session factory (for auth)
+SyncSessionLocal = sessionmaker(bind=engine, autocommit=False, autoflush=False)
+
+
+def get_db_session() -> Session:
+    return SyncSessionLocal()
+
+
+def get_current_user_from_request(request: Request) -> Optional[User]:
+    token = request.cookies.get(COOKIE_NAME)
+    if not token:
+        return None
+    payload = decode_token(token)
+    if not payload:
+        return None
+    username = payload.get("sub")
+    if not username:
+        return None
+    db = SyncSessionLocal()
+    try:
+        return db.query(User).filter(User.username == username, User.is_active == True).first()
+    finally:
+        db.close()
 
 ASYNC_DATABASE_URL = f"postgresql+asyncpg://{DB_USER}:{DB_PASSWORD}@{DB_HOST}:{DB_PORT}/{DB_NAME}"
 
@@ -56,7 +88,7 @@ AsyncSessionLocal = sessionmaker(
 )
 
 app = FastAPI(
-    title="Financial Prediction Models API",
+    title="Trading Signals API",
     description="""
 API для доступа к результатам обученных моделей прогнозирования финансовых инструментов.
 
@@ -85,6 +117,443 @@ app.mount("/static", StaticFiles(directory=str(BASE_DIR / "static")), name="stat
 
 # Директория с результатами
 OUTPUT_DIR = BASE_DIR / "output"
+
+# Streamlit dashboard URL (shown in top-bar nav)
+STREAMLIT_URL = os.getenv("STREAMLIT_URL", "http://localhost:8501")
+
+# Include auth router
+app.include_router(auth_router)
+
+
+@app.on_event("startup")
+async def startup_event():
+    """Create users table on startup if it doesn't exist."""
+    try:
+        AuthBase.metadata.create_all(bind=engine, tables=[User.__table__])
+        logger.info("Users table ready")
+    except Exception as e:
+        logger.warning(f"Could not create users table: {e}")
+
+
+# ============================================================
+# LLM Analysis Endpoint
+# ============================================================
+
+class LLMAnalyzeRequest(BaseModel):
+    ticker: str
+    current_price: float
+    trading_signal: str
+    r2_avg: float = 0.0
+    direction_accuracy_avg: float = 50.0
+    models_data: List[dict] = []
+
+
+@app.post("/api/llm/analyze", tags=["LLM"])
+async def llm_analyze(payload: LLMAnalyzeRequest):
+    """Query LLM to analyze a trading signal."""
+    result = analyze_signal(
+        ticker=payload.ticker,
+        current_price=payload.current_price,
+        trading_signal=payload.trading_signal,
+        models_data=payload.models_data,
+        r2_avg=payload.r2_avg,
+        direction_accuracy_avg=payload.direction_accuracy_avg,
+    )
+    return result
+
+
+# ============================================================
+# Ticker-level: страница + развёрнутый отчёт от LLM
+# ============================================================
+
+def _load_ticker_overview(db: Session, ticker_or_figi: str) -> dict:
+    """
+    Загружает последние записи по каждой модели для одного тикера.
+    Принимает либо ticker (SBER), либо figi (BBG004730N88).
+    """
+    from sqlalchemy import and_, or_
+
+    # Найдём FIGI и название
+    figi = None
+    ticker_name = None
+    row = db.execute(
+        text("SELECT ticker, figi FROM public.tickers WHERE ticker = :v OR figi = :v"),
+        {"v": ticker_or_figi},
+    ).fetchone()
+    if row:
+        ticker_name, figi = row[0], row[1]
+    else:
+        figi = ticker_or_figi
+        ticker_name = ticker_or_figi
+
+    # Последняя запись по каждой модели для этого FIGI
+    subq = (
+        db.query(
+            ModelResult.model_name,
+            func.max(ModelResult.timestamp).label("max_ts"),
+        )
+        .filter(ModelResult.db_name == figi)
+        .group_by(ModelResult.model_name)
+        .subquery()
+    )
+    rows = (
+        db.query(ModelResult)
+        .join(
+            subq,
+            and_(
+                ModelResult.model_name == subq.c.model_name,
+                ModelResult.timestamp == subq.c.max_ts,
+            ),
+        )
+        .filter(ModelResult.db_name == figi)
+        .all()
+    )
+
+    models = []
+    r2_vals, dir_vals = [], []
+    current_price = None
+    last_training_dt = None
+    for r in rows:
+        if r.current_price and current_price is None:
+            current_price = float(r.current_price)
+        if r.timestamp and (last_training_dt is None or r.timestamp > last_training_dt):
+            last_training_dt = r.timestamp
+        models.append({
+            "model_name": r.model_name,
+            "signal": r.trading_signal,
+            "r2": float(r.test_r2) if r.test_r2 is not None else None,
+            "direction_accuracy": float(r.test_direction_accuracy)
+                if r.test_direction_accuracy is not None else None,
+            "expected_change": float(r.expected_change)
+                if r.expected_change is not None else None,
+            "win_rate": float(r.win_rate) if r.win_rate is not None else None,
+            "predicted_price": float(r.predicted_price)
+                if r.predicted_price is not None else None,
+            "trained_at": r.timestamp.isoformat() if r.timestamp else None,
+        })
+        if r.test_r2 is not None:
+            r2_vals.append(float(r.test_r2))
+        if r.test_direction_accuracy is not None:
+            dir_vals.append(float(r.test_direction_accuracy))
+
+    # Подтянем TA по тикеру
+    ta = compute_ta_indicators(engine, figi) if figi else {}
+    if current_price is None and ta.get("last_price"):
+        current_price = ta["last_price"]
+
+    # Даты для отображения и для LLM
+    from datetime import timedelta as _td
+    data_date = ta.get("last_candle_date")  # дата последней свечи
+    # Прогнозная дата — следующий торговый день (приближаем как +1, +3 для пятницы)
+    prediction_date = None
+    if data_date:
+        try:
+            from datetime import datetime as _dt
+            d = _dt.fromisoformat(data_date).date()
+            # пятница (4) → пн (+3), суббота (5) → пн (+2), иначе +1
+            delta = 3 if d.weekday() == 4 else (2 if d.weekday() == 5 else 1)
+            prediction_date = (d + _td(days=delta)).isoformat()
+        except Exception:
+            pass
+
+    # Подсчёт сигналов
+    signals = {"BUY": 0, "SELL": 0, "HOLD": 0, "NEUTRAL": 0}
+    for m in models:
+        s = (m["signal"] or "").upper()
+        if s in signals:
+            signals[s] += 1
+
+    return {
+        "ticker": ticker_name,
+        "figi": figi,
+        "current_price": current_price,
+        "models": models,
+        "models_count": len(models),
+        "signals": signals,
+        "r2_avg": sum(r2_vals) / len(r2_vals) if r2_vals else None,
+        "direction_avg": sum(dir_vals) / len(dir_vals) if dir_vals else None,
+        "ta": ta,
+        "data_date": data_date,
+        "prediction_date": prediction_date,
+        "last_training_at": last_training_dt.isoformat() if last_training_dt else None,
+    }
+
+
+@app.get("/ticker/{ticker}", response_class=HTMLResponse, tags=["Pages"])
+async def ticker_page(request: Request, ticker: str):
+    """Страница с полной сводкой по тикеру + кнопка LLM-отчёта."""
+    current_user = get_current_user_from_request(request)
+    db = SyncSessionLocal()
+    try:
+        overview = _load_ticker_overview(db, ticker)
+    finally:
+        db.close()
+
+    return templates.TemplateResponse(
+        "ticker_report.html",
+        {
+            "request": request,
+            "current_user": current_user,
+            "streamlit_url": STREAMLIT_URL,
+            "overview": overview,
+        },
+    )
+
+
+@app.get("/api/ticker/{ticker}/predictions-history", tags=["Stats"])
+async def predictions_history(ticker: str, days: int = 90):
+    """
+    Возвращает данные для таблицы "реальная цена vs прогнозы моделей":
+      - actual_prices: реальная история close-цен за N дней
+      - predictions: точечные прогнозы из model_results
+        (с пометкой корректно/некорректно предсказано направление)
+      - stats_per_model: процент корректно предсказанных направлений по моделям
+    """
+    db = SyncSessionLocal()
+    try:
+        # FIGI и ticker_name
+        row = db.execute(
+            text("SELECT ticker, figi FROM public.tickers WHERE ticker = :v OR figi = :v"),
+            {"v": ticker},
+        ).fetchone()
+        if row:
+            ticker_name, figi = row[0], row[1]
+        else:
+            return JSONResponse(status_code=404, content={"error": f"Тикер {ticker} не найден"})
+
+        # Историческая цена + high/low за день
+        actual_rows = db.execute(
+            text(
+                f'SELECT timestamp::date AS d, close, high, low '
+                f'FROM all_dfs."{figi}" '
+                f"ORDER BY timestamp DESC LIMIT :n"
+            ),
+            {"n": days},
+        ).fetchall()
+        actual_prices = [
+            {
+                "date": r[0].isoformat(),
+                "close": float(r[1]),
+                "high": float(r[2]) if r[2] is not None else None,
+                "low": float(r[3]) if r[3] is not None else None,
+            }
+            for r in reversed(actual_rows)
+        ]
+
+        # Все предсказания за тот же период
+        if actual_prices:
+            since_date = actual_prices[0]["date"]
+        else:
+            since_date = "1970-01-01"
+
+        # DISTINCT ON (date, model) — если за день было несколько прогонов
+        # (например утренний + ночной), берём ПОСЛЕДНИЙ по timestamp.
+        pred_rows = db.execute(
+            text("""
+                SELECT DISTINCT ON (timestamp::date, model_name)
+                    timestamp, model_name, current_price, predicted_price,
+                    trading_signal, expected_change, llm_signal
+                FROM public.model_results
+                WHERE db_name = :figi
+                  AND timestamp::date >= :since
+                  AND predicted_price IS NOT NULL
+                  AND current_price IS NOT NULL
+                ORDER BY timestamp::date, model_name, timestamp DESC
+            """),
+            {"figi": figi, "since": since_date},
+        ).fetchall()
+        # Сортировка по дате/времени для отображения
+        pred_rows = sorted(pred_rows, key=lambda r: r[0])
+
+        # Карты для проверки направления и для отображения high/low
+        date_to_close = {p["date"]: p["close"] for p in actual_prices}
+        date_to_high = {p["date"]: p["high"] for p in actual_prices}
+        date_to_low = {p["date"]: p["low"] for p in actual_prices}
+        dates_sorted = [p["date"] for p in actual_prices]
+
+        def next_bar_after(d_str: str):
+            """
+            Возвращает (date, close, high, low) для ПЕРВОГО торгового дня
+            строго после d_str. Корректно обрабатывает выходные/праздники.
+            """
+            for date_iso in dates_sorted:
+                if date_iso > d_str:
+                    return (
+                        date_iso,
+                        date_to_close[date_iso],
+                        date_to_high.get(date_iso),
+                        date_to_low.get(date_iso),
+                    )
+            return (None, None, None, None)
+
+        predictions = []
+        per_model_stats = {}
+        for r in pred_rows:
+            d_iso = r[0].date().isoformat()
+            cur = float(r[2])
+            pred = float(r[3])
+            signal = r[4]
+            model = r[1]
+
+            # Проверка корректности предсказанного направления + high/low следующего дня
+            next_date, actual_next, next_high, next_low = next_bar_after(d_iso)
+            correct = None
+            if actual_next is not None:
+                pred_up = pred > cur
+                actual_up = actual_next > cur
+                correct = bool(pred_up == actual_up)
+
+            predictions.append({
+                "date": d_iso,
+                "model": model,
+                "current_price": cur,
+                "predicted_price": pred,
+                "signal": signal,
+                "expected_change": float(r[5]) if r[5] is not None else None,
+                "llm_signal": r[6],
+                "correct_direction": correct,
+                "actual_next_close": actual_next,
+                "actual_next_high": next_high,
+                "actual_next_low": next_low,
+                "actual_next_date": next_date,
+            })
+
+            if correct is not None:
+                s = per_model_stats.setdefault(model, {"total": 0, "hits": 0})
+                s["total"] += 1
+                if correct:
+                    s["hits"] += 1
+
+        stats_per_model = [
+            {
+                "model": m,
+                "total": s["total"],
+                "hits": s["hits"],
+                "hit_rate": round(s["hits"] / s["total"] * 100, 1) if s["total"] else 0,
+            }
+            for m, s in sorted(per_model_stats.items())
+        ]
+
+        return {
+            "ticker": ticker_name,
+            "figi": figi,
+            "actual_prices": actual_prices,
+            "predictions": predictions,
+            "stats_per_model": stats_per_model,
+            "total_predictions": len(predictions),
+        }
+    finally:
+        db.close()
+
+
+@app.get("/api/ticker/{ticker}/ai-reports-history", tags=["Stats"])
+async def ai_reports_history(ticker: str, days: int = 60):
+    """
+    История консолидированных AI-отчётов по тикеру:
+    каждая запись = один LLM-вердикт за день + факт следующего дня.
+    """
+    db = SyncSessionLocal()
+    try:
+        row = db.execute(
+            text("SELECT ticker, figi FROM public.tickers WHERE ticker = :v OR figi = :v"),
+            {"v": ticker},
+        ).fetchone()
+        if not row:
+            return JSONResponse(status_code=404, content={"error": f"Тикер {ticker} не найден"})
+        ticker_name, figi = row[0], row[1]
+
+        # DISTINCT ON (data_date) — если за день было несколько прогонов
+        # (утренний/ночной/ручной), показываем ТОЛЬКО последний по timestamp.
+        reports = db.execute(text("""
+            SELECT id, timestamp, data_date, prediction_date, current_price,
+                   verdict, confidence, entry_price, target_price, stop_loss,
+                   reasoning,
+                   actual_close, actual_high, actual_low,
+                   correct_direction, target_hit, stop_hit
+            FROM (
+                SELECT DISTINCT ON (data_date) *
+                FROM public.ticker_reports
+                WHERE figi = :figi
+                  AND timestamp >= NOW() - (:days || ' days')::interval
+                ORDER BY data_date DESC NULLS LAST, timestamp DESC
+            ) latest
+            ORDER BY data_date DESC NULLS LAST, timestamp DESC
+        """), {"figi": figi, "days": days}).fetchall()
+
+        items = []
+        for r in reports:
+            items.append({
+                "id": r[0],
+                "timestamp": r[1].isoformat() if r[1] else None,
+                "data_date": r[2].isoformat() if r[2] else None,
+                "prediction_date": r[3].isoformat() if r[3] else None,
+                "current_price": float(r[4]) if r[4] is not None else None,
+                "verdict": r[5],
+                "confidence": r[6],
+                "entry_price": float(r[7]) if r[7] is not None else None,
+                "target_price": float(r[8]) if r[8] is not None else None,
+                "stop_loss": float(r[9]) if r[9] is not None else None,
+                "reasoning": r[10],
+                "actual_close": float(r[11]) if r[11] is not None else None,
+                "actual_high": float(r[12]) if r[12] is not None else None,
+                "actual_low": float(r[13]) if r[13] is not None else None,
+                "correct_direction": r[14],
+                "target_hit": r[15],
+                "stop_hit": r[16],
+            })
+
+        # Статистика по корректности
+        resolved = [it for it in items if it["correct_direction"] is not None]
+        correct = [it for it in resolved if it["correct_direction"]]
+        target_hits = [it for it in resolved if it["target_hit"]]
+        return {
+            "ticker": ticker_name,
+            "figi": figi,
+            "items": items,
+            "total": len(items),
+            "resolved": len(resolved),
+            "correct": len(correct),
+            "accuracy": round(len(correct) / len(resolved) * 100, 1) if resolved else None,
+            "target_hits": len(target_hits),
+        }
+    finally:
+        db.close()
+
+
+class TickerReportRequest(BaseModel):
+    ticker: str  # либо тикер, либо FIGI
+
+
+@app.post("/api/llm/ticker-report", tags=["LLM"])
+async def llm_ticker_report(payload: TickerReportRequest):
+    """
+    Развёрнутый отчёт от LLM по тикеру:
+    использует ВСЕ доступные модели + TA-индикаторы.
+    В будущем подключится новостной фон.
+    """
+    db = SyncSessionLocal()
+    try:
+        overview = _load_ticker_overview(db, payload.ticker)
+    finally:
+        db.close()
+
+    if not overview["models"]:
+        return JSONResponse(
+            status_code=404,
+            content={"error": f"Нет данных моделей для тикера {payload.ticker}"},
+        )
+
+    # news_items пока None — задел на будущее
+    report = generate_ticker_report(
+        ticker=overview["ticker"],
+        current_price=overview["current_price"] or 0.0,
+        models_data=overview["models"],
+        ta_indicators=overview["ta"],
+        news_items=None,
+        data_date=overview.get("data_date"),
+        prediction_date=overview.get("prediction_date"),
+    )
+    return report
 
 
 # ============================================================
@@ -137,74 +606,121 @@ async def readiness_check():
 @app.get("/", response_class=HTMLResponse, tags=["Pages"], description="Стартовая страница")
 async def read_root(request: Request):
     """Главная страница со списком доступных моделей"""
-    try:
-        # Создаем сессию
-        Session = sessionmaker(bind=engine)
-        session = Session()
+    current_user = get_current_user_from_request(request)
 
-        # Запрашиваем все уникальные модели из базы данных
-        models = session.query(ModelResult.model_name).distinct().all()
+    try:
+        db = SyncSessionLocal()
+
+        models = db.query(ModelResult.model_name).distinct().all()
         logger.info(f"Найдено {len(models)} уникальных моделей в базе данных")
 
         models_info = []
+        from sqlalchemy import and_
 
         for model in models:
-            model_name = model[0]  # Извлекаем название модели из кортежа
+            model_name = model[0]
 
-            # Если это не сводка, а модель
             if model_name != "all_models":
-                # Находим самую последнюю дату для этой модели
-                latest_timestamp = session.query(func.max(ModelResult.timestamp)).filter(
-                    ModelResult.model_name == model_name
-                ).scalar()
+                # Берём ПОСЛЕДНЮЮ запись по КАЖДОМУ тикеру (db_name),
+                # а не одну глобально-последнюю — тикеры обучаются
+                # последовательно, у каждого свой timestamp.
+                subq = (
+                    db.query(
+                        ModelResult.db_name,
+                        func.max(ModelResult.timestamp).label("max_ts"),
+                    )
+                    .filter(ModelResult.model_name == model_name)
+                    .group_by(ModelResult.db_name)
+                    .subquery()
+                )
+                latest_results = (
+                    db.query(ModelResult)
+                    .join(
+                        subq,
+                        and_(
+                            ModelResult.db_name == subq.c.db_name,
+                            ModelResult.timestamp == subq.c.max_ts,
+                        ),
+                    )
+                    .filter(ModelResult.model_name == model_name)
+                    .all()
+                )
 
-                if latest_timestamp:
-                    # Получаем только записи с последней временной меткой
-                    latest_results = session.query(ModelResult).filter(
-                        ModelResult.model_name == model_name,
-                        ModelResult.timestamp == latest_timestamp
-                    ).all()
-
-                    # Считаем количество записей для последней даты
+                if latest_results:
+                    latest_timestamp = max(r.timestamp for r in latest_results)
                     total_files = len(latest_results)
-
-                    # Анализируем сигналы в результатах модели
                     signals_count = {"BUY": 0, "SELL": 0, "HOLD": 0, "NEUTRAL": 0}
 
+                    r2_vals, dir_vals = [], []
                     for result in latest_results:
-                        content = result.text
+                        # Use structured DB fields first, fall back to text parsing
+                        sig = result.trading_signal
+                        if not sig:
+                            content = result.text or ""
+                            if "Торговый сигнал: BUY" in content:
+                                sig = "BUY"
+                            elif "Торговый сигнал: SELL" in content:
+                                sig = "SELL"
+                            elif "Торговый сигнал: HOLD" in content:
+                                sig = "HOLD"
+                            elif "Торговый сигнал: NEUTRAL" in content:
+                                sig = "NEUTRAL"
 
-                        # Определяем сигнал из содержимого
-                        if "Торговый сигнал: BUY" in content:
-                            signals_count["BUY"] += 1
-                        elif "Торговый сигнал: SELL" in content:
-                            signals_count["SELL"] += 1
-                        elif "Торговый сигнал: HOLD" in content:
-                            signals_count["HOLD"] += 1
-                        elif "Торговый сигнал: NEUTRAL" in content:
-                            signals_count["NEUTRAL"] += 1
+                        if sig in signals_count:
+                            signals_count[sig] += 1
 
-                    # Собираем информацию о модели
+                        if result.test_r2 is not None:
+                            r2_vals.append(result.test_r2)
+                        if result.test_direction_accuracy is not None:
+                            dir_vals.append(result.test_direction_accuracy)
+
+                    avg_r2 = sum(r2_vals) / len(r2_vals) if r2_vals else None
+                    avg_dir = sum(dir_vals) / len(dir_vals) if dir_vals else None
+
                     models_info.append({
                         "name": model_name,
                         "total_files": total_files,
                         "signals": signals_count,
-                        "latest_date": latest_timestamp.strftime("%Y-%m-%d %H:%M:%S")
+                        "latest_date": latest_timestamp.strftime("%Y-%m-%d %H:%M:%S"),
+                        "avg_r2": avg_r2,
+                        "avg_direction": avg_dir,
                     })
 
-        # Сортируем модели по количеству записей (по убыванию)
         models_info.sort(key=lambda x: x["total_files"], reverse=True)
-
-        # Закрываем сессию
-        session.close()
+        db.close()
 
     except Exception as e:
         logger.error(f"Ошибка при получении данных из базы данных: {e}")
         models_info = []
 
+    # Список уникальных тикеров с актуальными данными — для быстрого перехода
+    # на страницу AI-отчёта
+    try:
+        db2 = SyncSessionLocal()
+        ticker_rows = db2.execute(text("""
+            SELECT DISTINCT
+                COALESCE(t.ticker, mr.ticker_name, mr.db_name) AS ticker,
+                mr.db_name AS figi
+            FROM public.model_results mr
+            LEFT JOIN public.tickers t ON mr.db_name = t.figi
+            WHERE mr.trading_signal IS NOT NULL
+            ORDER BY 1
+        """)).fetchall()
+        tickers_list = [{"ticker": r[0], "figi": r[1]} for r in ticker_rows]
+        db2.close()
+    except Exception as e:
+        logger.warning(f"Не удалось получить список тикеров: {e}")
+        tickers_list = []
+
     return templates.TemplateResponse(
         "models_list.html",
-        {"request": request, "models_info": models_info}
+        {
+            "request": request,
+            "models_info": models_info,
+            "current_user": current_user,
+            "streamlit_url": STREAMLIT_URL,
+            "tickers_list": tickers_list,
+        },
     )
 
 
@@ -217,76 +733,90 @@ async def view_model(request: Request,
                      order: str = "desc"):
     """Страница с результатами конкретной модели"""
     logger.info(f"Запрошена модель: {model_name}")
+    current_user = get_current_user_from_request(request)
 
     try:
-        # Создаем сессию SQLAlchemy
-        Session = sessionmaker(bind=engine)
-        session = Session()
+        db = SyncSessionLocal()
 
-        # Запрашиваем данные для выбранной модели из базы данных
-        query = session.query(ModelResult).filter(ModelResult.model_name == model_name)
-        model_results = query.all()
+        # Берём только ПОСЛЕДНЮЮ запись по каждому тикеру (db_name)
+        # для этой модели — чтобы не показывать дубли от walk-forward
+        # фолдов и предыдущих запусков обучения.
+        from sqlalchemy import and_
+        subq = (
+            db.query(
+                ModelResult.db_name,
+                func.max(ModelResult.timestamp).label("max_ts"),
+            )
+            .filter(ModelResult.model_name == model_name)
+            .group_by(ModelResult.db_name)
+            .subquery()
+        )
+        model_results = (
+            db.query(ModelResult)
+            .join(
+                subq,
+                and_(
+                    ModelResult.db_name == subq.c.db_name,
+                    ModelResult.timestamp == subq.c.max_ts,
+                ),
+            )
+            .filter(ModelResult.model_name == model_name)
+            .all()
+        )
+        logger.info(f"Найдено {len(model_results)} уникальных тикеров для модели {model_name}")
 
-        logger.info(f"Найдено {len(model_results)} записей для модели {model_name}")
-
-        # Если данных нет, возвращаемся на главную
         if not model_results:
-            session.close()
+            db.close()
             return RedirectResponse(url="/")
 
         files_data = []
 
         for result in model_results:
             try:
-                content = result.text
+                content = result.text or ""
 
-                # Определяем сигнал из содержимого
-                file_signal = None
-                if "Торговый сигнал: BUY" in content:
-                    file_signal = "BUY"
-                elif "Торговый сигнал: SELL" in content:
-                    file_signal = "SELL"
-                elif "Торговый сигнал: HOLD" in content:
-                    file_signal = "HOLD"
-                elif "Торговый сигнал: NEUTRAL" in content:
-                    file_signal = "NEUTRAL"
+                # Use structured DB fields (primary) with text fallback
+                file_signal = result.trading_signal
+                if not file_signal:
+                    if "Торговый сигнал: BUY" in content:
+                        file_signal = "BUY"
+                    elif "Торговый сигнал: SELL" in content:
+                        file_signal = "SELL"
+                    elif "Торговый сигнал: HOLD" in content:
+                        file_signal = "HOLD"
+                    elif "Торговый сигнал: NEUTRAL" in content:
+                        file_signal = "NEUTRAL"
 
-                # Если указан фильтр по сигналу и он не совпадает, пропускаем запись
                 if signal and signal.upper() != file_signal:
                     continue
 
-                # Извлекаем Direction Accuracy
-                accuracy = None
-                accuracy_match = re.search(r'Direction Accuracy: (\d+\.\d+)', content)
-                if accuracy_match:
-                    accuracy = float(accuracy_match.group(1))
+                # Structured metrics from DB
+                accuracy = result.test_direction_accuracy
+                r_squared = result.test_r2
+                mape = result.test_mape
+                expected_change = result.expected_change
+                current_price = result.current_price
+                win_rate = result.win_rate
+                profit_factor = result.profit_factor
+                cumulative_return = result.cumulative_return
+                total_trades = result.total_trades
 
-                # Извлекаем R² (коэффициент детерминации)
-                r_squared = None
-                r2_match = re.search(r'R²: (\d+\.\d+)', content)
-                if r2_match:
-                    r_squared = float(r2_match.group(1))
+                # Extract sharpe_ratio from text (not in DB schema yet)
+                sharpe_ratio = None
+                sr_match = re.search(r'Sharpe Ratio: ([-+]?\d+\.\d+)', content)
+                if sr_match:
+                    sharpe_ratio = float(sr_match.group(1))
 
-                # Извлекаем MAPE
-                mape = None
-                mape_match = re.search(r'MAPE: (\d+\.\d+)', content)
-                if mape_match:
-                    mape = float(mape_match.group(1))
+                max_drawdown = None
+                md_match = re.search(r'Максимальная просадка: ([\d.]+)%', content)
+                if md_match:
+                    max_drawdown = float(md_match.group(1))
 
-                # Получаем тикер из имени базы данных
-                ticker = result.db_name if result.db_name else "Unknown"
-
-                # Форматируем дату из timestamp
-                date = result.timestamp.strftime("%Y%m%d") if result.timestamp else "Unknown"
-
-                # Извлекаем ожидаемое изменение цены
-                expected_change = None
-                change_match = re.search(r'Ожидаемое изменение: ([+-]?\d+\.\d+)%', content)
-                if change_match:
-                    expected_change = float(change_match.group(1))
+                ticker = result.ticker_name or result.db_name or "Unknown"
+                date = result.timestamp.strftime("%Y-%m-%d") if result.timestamp else "Unknown"
 
                 files_data.append({
-                    'name': result.db_name,  # Используем имя db файла
+                    'name': result.db_name,
                     'content': content,
                     'signal': file_signal,
                     'accuracy': accuracy,
@@ -295,48 +825,41 @@ async def view_model(request: Request,
                     'ticker': ticker,
                     'algorithm': model_name,
                     'date': date,
-                    'expected_change': expected_change
+                    'expected_change': expected_change,
+                    'current_price': current_price,
+                    'win_rate': win_rate,
+                    'profit_factor': profit_factor,
+                    'cumulative_return': cumulative_return,
+                    'total_trades': total_trades,
+                    'sharpe_ratio': sharpe_ratio,
+                    'max_drawdown': max_drawdown,
+                    'llm_signal': result.llm_signal,
+                    'llm_reasoning': result.llm_reasoning,
+                    'llm_processed_at': result.llm_processed_at.strftime('%Y-%m-%d %H:%M') if result.llm_processed_at else None,
                 })
             except Exception as e:
-                logger.error(f"Ошибка при обработке записи {result.id} для {result.db_name}: {e}")
-                files_data.append({
-                    'name': result.db_name,
-                    'content': f"Ошибка обработки данных: {str(e)}",
-                    'signal': None,
-                    'accuracy': None,
-                    'ticker': "Error",
-                    'algorithm': model_name,
-                    'date': "Error"
-                })
+                logger.error(f"Ошибка при обработке записи {result.id}: {e}")
 
-        # Закрываем сессию
-        session.close()
+        db.close()
 
-        # Получаем статистику по сигналам для отображения в фильтрах
         signal_stats = {
-            "BUY": sum(1 for file in files_data if file['signal'] == "BUY"),
-            "SELL": sum(1 for file in files_data if file['signal'] == "SELL"),
-            "HOLD": sum(1 for file in files_data if file['signal'] == "HOLD"),
-            "NEUTRAL": sum(1 for file in files_data if file['signal'] == "NEUTRAL")
+            "BUY": sum(1 for f in files_data if f['signal'] == "BUY"),
+            "SELL": sum(1 for f in files_data if f['signal'] == "SELL"),
+            "HOLD": sum(1 for f in files_data if f['signal'] == "HOLD"),
+            "NEUTRAL": sum(1 for f in files_data if f['signal'] == "NEUTRAL"),
         }
 
-        # Сортировка результатов
-        if sort == "accuracy" and order == "desc":
-            files_data.sort(key=lambda x: x.get('accuracy', 0) or 0, reverse=True)
-        elif sort == "accuracy" and order == "asc":
-            files_data.sort(key=lambda x: x.get('accuracy', 0) or 0)
-        elif sort == "r_squared" and order == "desc":
-            files_data.sort(key=lambda x: x.get('r_squared', 0) or 0, reverse=True)
-        elif sort == "r_squared" and order == "asc":
-            files_data.sort(key=lambda x: x.get('r_squared', 0) or 0)
-        elif sort == "mape" and order == "desc":
-            files_data.sort(key=lambda x: x.get('mape', 0) or 0, reverse=True)
-        elif sort == "mape" and order == "asc":
-            files_data.sort(key=lambda x: x.get('mape', 0) or 0)
-        elif sort == "expected_change" and order == "desc":
-            files_data.sort(key=lambda x: x.get('expected_change', 0) or 0, reverse=True)
-        elif sort == "expected_change" and order == "asc":
-            files_data.sort(key=lambda x: x.get('expected_change', 0) or 0)
+        sort_key_map = {
+            "accuracy": "accuracy",
+            "r_squared": "r_squared",
+            "expected_change": "expected_change",
+            "win_rate": "win_rate",
+        }
+        skey = sort_key_map.get(sort, "accuracy")
+        files_data.sort(
+            key=lambda x: x.get(skey) or 0,
+            reverse=(order == "desc"),
+        )
 
         return templates.TemplateResponse(
             "model_detail.html",
@@ -347,7 +870,9 @@ async def view_model(request: Request,
                 "current_signal": signal,
                 "current_sort": sort,
                 "current_order": order,
-                "signal_stats": signal_stats
+                "signal_stats": signal_stats,
+                "current_user": current_user,
+                "streamlit_url": STREAMLIT_URL,
             }
         )
 
@@ -355,10 +880,7 @@ async def view_model(request: Request,
         logger.error(f"Ошибка при получении данных из базы данных: {e}")
         return templates.TemplateResponse(
             "error.html",
-            {
-                "request": request,
-                "error_message": f"Произошла ошибка при загрузке данных модели: {str(e)}"
-            }
+            {"request": request, "error_message": str(e)}
         )
 
 

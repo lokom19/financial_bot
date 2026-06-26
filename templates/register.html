@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Регистрация — Trading Signals</title>
+    <link rel="stylesheet" href="/static/styles.css?v=4">
+    <style>
+        .auth-container {
+            max-width: 440px;
+            margin: 60px auto;
+            background: #fff;
+            border-radius: 12px;
+            box-shadow: 0 4px 24px rgba(0,0,0,0.10);
+            padding: 40px 36px 32px;
+        }
+        .auth-title { font-size: 24px; font-weight: 700; color: #1a1a2e; margin-bottom: 6px; text-align: center; }
+        .auth-subtitle { text-align: center; color: #666; margin-bottom: 28px; font-size: 14px; }
+        .form-group { margin-bottom: 16px; }
+        .form-group label { display: block; font-weight: 600; margin-bottom: 6px; color: #333; font-size: 14px; }
+        .form-group input {
+            width: 100%; padding: 10px 14px; border: 1.5px solid #ddd;
+            border-radius: 8px; font-size: 15px; box-sizing: border-box;
+            transition: border-color 0.2s; outline: none;
+        }
+        .form-group input:focus { border-color: #4361ee; }
+        .btn-primary {
+            width: 100%; padding: 12px; background: #4361ee; color: #fff;
+            border: none; border-radius: 8px; font-size: 16px; font-weight: 600;
+            cursor: pointer; margin-top: 8px; transition: background 0.2s;
+        }
+        .btn-primary:hover { background: #3650d8; }
+        .auth-error {
+            background: #fde8e8; border: 1px solid #f5c6c6; border-radius: 8px;
+            padding: 10px 14px; color: #c0392b; margin-bottom: 18px; font-size: 14px;
+        }
+        .auth-link { text-align: center; margin-top: 20px; font-size: 14px; color: #666; }
+        .auth-link a { color: #4361ee; text-decoration: none; font-weight: 600; }
+        .auth-link a:hover { text-decoration: underline; }
+        .auth-logo { text-align: center; font-size: 32px; margin-bottom: 12px; }
+        .hint { font-size: 12px; color: #999; margin-top: 4px; }
+    </style>
+</head>
+<body style="background: #f0f4ff; min-height: 100vh;">
+    <div class="auth-container">
+        <div class="auth-logo">📈</div>
+        <div class="auth-title">Регистрация</div>
+        <div class="auth-subtitle">Создайте аккаунт для доступа к торговым сигналам</div>
+
+        {% if error %}
+        <div class="auth-error">{{ error }}</div>
+        {% endif %}
+
+        <form method="post" action="/auth/register">
+            <div class="form-group">
+                <label for="username">Имя пользователя *</label>
+                <input type="text" id="username" name="username" placeholder="myusername" required autofocus>
+            </div>
+            <div class="form-group">
+                <label for="email">Email *</label>
+                <input type="email" id="email" name="email" placeholder="user@example.com" required>
+            </div>
+            <div class="form-group">
+                <label for="full_name">Полное имя</label>
+                <input type="text" id="full_name" name="full_name" placeholder="Иван Иванов">
+            </div>
+            <div class="form-group">
+                <label for="password">Пароль *</label>
+                <input type="password" id="password" name="password" placeholder="••••••••" required>
+                <div class="hint">Минимум 6 символов</div>
+            </div>
+            <div class="form-group">
+                <label for="password2">Повторите пароль *</label>
+                <input type="password" id="password2" name="password2" placeholder="••••••••" required>
+            </div>
+            <button type="submit" class="btn-primary">Создать аккаунт</button>
+        </form>
+
+        <div class="auth-link">
+            Уже есть аккаунт? <a href="/auth/login">Войти</a>
+        </div>
+    </div>
+</body>
+</html>

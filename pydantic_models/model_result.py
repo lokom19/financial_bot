@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, Text, DateTime, Float, Date
+from sqlalchemy import Column, Integer, String, Text, DateTime, Float, Date, Boolean
 from sqlalchemy.ext.declarative import declarative_base
 
 Base = declarative_base()
@@ -51,5 +51,60 @@ class ModelResult(Base):
     profit_factor = Column(Float, nullable=True)  # sum(profits) / sum(losses)
     cumulative_return = Column(Float, nullable=True)  # Общая доходность в %
 
+    # LLM-валидация сигнала (ночной пайплайн)
+    llm_signal = Column(String(20), nullable=True)  # AGREE / DISAGREE / UNAVAILABLE
+    llm_reasoning = Column(Text, nullable=True)     # Развёрнутое обоснование от LLM
+    llm_processed_at = Column(DateTime, nullable=True)
+
     def __repr__(self):
         return f"<ModelResult(model='{self.model_name}', ticker='{self.ticker_name or self.db_name}', r2={self.test_r2})>"
+
+
+class TickerReport(Base):
+    """
+    Консолидированный AI-отчёт по тикеру (один на (тикер, день)).
+
+    LLM агрегирует прогнозы всех моделей + TA + (на будущее) новости
+    и выносит ОДИН вердикт BUY/SELL/HOLD с целевыми ценами.
+    Точность этих вердиктов отслеживается отдельно от per-моделной статистики.
+    """
+    __tablename__ = "ticker_reports"
+    __table_args__ = {"schema": "public"}
+
+    id = Column(Integer, primary_key=True)
+    figi = Column(String(64), nullable=False, index=True)
+    ticker = Column(String(20), nullable=True, index=True)
+    timestamp = Column(DateTime, nullable=False, index=True)  # когда отчёт сгенерирован
+    data_date = Column(Date, nullable=True)        # на какую дату данные
+    prediction_date = Column(Date, nullable=True)  # на какой день прогноз
+
+    # Вход (текущая цена на момент отчёта)
+    current_price = Column(Float, nullable=True)
+
+    # Вердикт LLM
+    verdict = Column(String(20), nullable=True)       # BUY / SELL / HOLD / UNKNOWN
+    confidence = Column(String(20), nullable=True)    # высокая / средняя / низкая
+    entry_price = Column(Float, nullable=True)
+    target_price = Column(Float, nullable=True)
+    stop_loss = Column(Float, nullable=True)
+    reasoning = Column(Text, nullable=True)
+
+    # Снэпшоты входных данных (JSON-строки)
+    sections_json = Column(Text, nullable=True)         # разделы отчёта
+    models_snapshot_json = Column(Text, nullable=True)  # модели, что кормили отчёт
+    ta_snapshot_json = Column(Text, nullable=True)      # значения индикаторов
+
+    # Факт (заполняется на следующий день после prediction_date)
+    actual_close = Column(Float, nullable=True)
+    actual_high = Column(Float, nullable=True)
+    actual_low = Column(Float, nullable=True)
+    actual_resolved_at = Column(DateTime, nullable=True)
+    correct_direction = Column(Boolean, nullable=True)
+    target_hit = Column(Boolean, nullable=True)
+    stop_hit = Column(Boolean, nullable=True)
+
+    def __repr__(self):
+        return (
+            f"<TickerReport(ticker='{self.ticker}', "
+            f"date={self.data_date}, verdict={self.verdict})>"
+        )

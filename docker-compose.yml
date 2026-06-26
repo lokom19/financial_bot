@@ -1,5 +1,3 @@
-version: '3.8'
-
 services:
   # ============================================================
   # PostgreSQL Database
@@ -11,8 +9,6 @@ services:
       POSTGRES_USER: ${DB_USER:-postgres}
       POSTGRES_PASSWORD: ${DB_PASSWORD:-postgres}
       POSTGRES_DB: ${DB_NAME:-postgres}
-    ports:
-      - "${DB_PORT:-5432}:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
@@ -21,6 +17,26 @@ services:
       timeout: 5s
       retries: 5
     restart: unless-stopped
+    networks: [internal]
+
+  # ============================================================
+  # Migration / DB init — запускается один раз и завершает работу
+  # ============================================================
+  migrate:
+    build: .
+    container_name: arima_migrate
+    command: python scripts/setup_db.py
+    environment:
+      - DB_HOST=postgres
+      - DB_PORT=5432
+      - DB_NAME=${DB_NAME:-postgres}
+      - DB_USER=${DB_USER:-postgres}
+      - DB_PASSWORD=${DB_PASSWORD:-postgres}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no"
+    networks: [internal]
 
   # ============================================================
   # FastAPI Application
@@ -28,33 +44,45 @@ services:
   app:
     build: .
     container_name: arima_app
-    ports:
-      - "8000:8000"
+    command: uvicorn main:app --host 0.0.0.0 --port 8002
     environment:
       - DB_HOST=postgres
       - DB_PORT=5432
       - DB_NAME=${DB_NAME:-postgres}
       - DB_USER=${DB_USER:-postgres}
       - DB_PASSWORD=${DB_PASSWORD:-postgres}
+      - SECRET_KEY=${SECRET_KEY:-change-me-in-production}
+      - GROQ_API_KEY=${GROQ_API_KEY:-}
+      - GROQ_MODEL=${GROQ_MODEL:-llama-3.3-70b-versatile}
+      - LLM_URL=${LLM_URL:-http://ollama:11434/api/chat}
+      - LLM_MODEL=${LLM_MODEL:-llama3}
+      - LLM_TIMEOUT=${LLM_TIMEOUT:-30}
+      - STREAMLIT_URL=${STREAMLIT_URL:-https://${DOMAIN:-localhost}/dashboard/}
+      - TZ=${TZ:-Europe/Moscow}
     volumes:
       - ./templates:/app/templates
       - ./static:/app/static
       - ./output:/app/output
+      - ./logs:/app/logs
     depends_on:
       postgres:
         condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
     restart: unless-stopped
+    networks: [internal]
 
   # ============================================================
-  # Scheduler (Data Collection + Training)
+  # Nightly Scheduler — fetch + train + LLM + AI reports
   # ============================================================
   scheduler:
     build: .
     container_name: arima_scheduler
     command: >
       python scripts/scheduler.py
-      --interval ${SCHEDULER_INTERVAL:-3}
-      --days ${SCHEDULER_DAYS:-2000}
+      --nightly --no-initial
+      --nightly-hour ${NIGHTLY_HOUR:-2}
+      --nightly-minute ${NIGHTLY_MINUTE:-0}
     environment:
       - DB_HOST=postgres
       - DB_PORT=5432
@@ -62,11 +90,23 @@ services:
       - DB_USER=${DB_USER:-postgres}
       - DB_PASSWORD=${DB_PASSWORD:-postgres}
       - INVEST_TOKEN=${INVEST_TOKEN}
+      - GROQ_API_KEY=${GROQ_API_KEY:-}
+      - GROQ_MODEL=${GROQ_MODEL:-llama-3.3-70b-versatile}
+      - LLM_URL=${LLM_URL:-http://ollama:11434/api/chat}
+      - LLM_MODEL=${LLM_MODEL:-llama3}
+      - NIGHTLY_FETCH_DAYS=${NIGHTLY_FETCH_DAYS:-7}
+      - NIGHTLY_TRAIN_TIMEOUT=${NIGHTLY_TRAIN_TIMEOUT:-10800}
+      - NIGHTLY_LLM_LOOKBACK_HOURS=${NIGHTLY_LLM_LOOKBACK_HOURS:-12}
+      - NIGHTLY_EXCLUDE_MODELS=${NIGHTLY_EXCLUDE_MODELS:-lstm,tcn,rdpg_lstm}
+      - TZ=${TZ:-Europe/Moscow}
       - LOG_TO_FILE=false
     depends_on:
       postgres:
         condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
     restart: unless-stopped
+    networks: [internal]
 
   # ============================================================
   # Streamlit Dashboard
@@ -74,19 +114,60 @@ services:
   dashboard:
     build: .
     container_name: arima_dashboard
-    command: streamlit run streamlit_app/app.py --server.port 8501 --server.address 0.0.0.0
-    ports:
-      - "8501:8501"
+    command: >
+      streamlit run streamlit_app/app.py
+      --server.port 8501
+      --server.address 0.0.0.0
+      --server.baseUrlPath=/dashboard
+      --server.headless true
     environment:
       - DB_HOST=postgres
       - DB_PORT=5432
       - DB_NAME=${DB_NAME:-postgres}
       - DB_USER=${DB_USER:-postgres}
       - DB_PASSWORD=${DB_PASSWORD:-postgres}
+      - TZ=${TZ:-Europe/Moscow}
     depends_on:
       postgres:
         condition: service_healthy
     restart: unless-stopped
+    networks: [internal]
+
+  # ============================================================
+  # Nginx (reverse proxy + HTTPS)
+  # ============================================================
+  nginx:
+    image: nginx:1.27-alpine
+    container_name: arima_nginx
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx/conf.d:/etc/nginx/conf.d:ro
+      - ./nginx/certbot/www:/var/www/certbot:ro
+      - ./nginx/certbot/conf:/etc/letsencrypt:ro
+    depends_on:
+      - app
+      - dashboard
+    restart: unless-stopped
+    networks: [internal]
+
+  # ============================================================
+  # Certbot — Let's Encrypt SSL (запускается из cron на хосте)
+  # ============================================================
+  certbot:
+    image: certbot/certbot
+    container_name: arima_certbot
+    volumes:
+      - ./nginx/certbot/www:/var/www/certbot
+      - ./nginx/certbot/conf:/etc/letsencrypt
+    entrypoint: "/bin/sh -c 'trap exit TERM; while :; do certbot renew --webroot -w /var/www/certbot; sleep 12h & wait $${!}; done;'"
+    restart: unless-stopped
+    networks: [internal]
 
 volumes:
   postgres_data:
+
+networks:
+  internal:
+    driver: bridge

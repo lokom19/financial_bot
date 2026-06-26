@@ -1,0 +1,813 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{ overview.ticker }} — AI-отчёт</title>
+    <link rel="stylesheet" href="/static/styles.css?v=4">
+    <style>
+        /* top-bar теперь в общем styles.css (.tb-top) */
+
+        .page { max-width: 1180px; margin: 28px auto; padding: 0 24px; }
+        .hdr { display: flex; align-items: baseline; gap: 16px; margin-bottom: 24px; flex-wrap: wrap; }
+        .hdr h1 { margin: 0; font-size: 32px; color: var(--text); letter-spacing: -0.025em; }
+        .hdr .price { font-size: 22px; color: var(--primary); font-weight: 700; font-variant-numeric: tabular-nums; }
+        .hdr .meta { color: var(--text-soft); font-size: 13px; }
+
+        .summary-grid {
+            display: grid; grid-template-columns: 2fr 3fr;
+            gap: 20px; margin-bottom: 24px;
+        }
+        @media (max-width: 760px) { .summary-grid { grid-template-columns: 1fr; } }
+        .card {
+            background: var(--surface); border-radius: 14px; padding: 22px;
+            border: 1px solid var(--border);
+            box-shadow: var(--card-shadow);
+        }
+        .card h3 {
+            margin: 0 0 14px; font-size: 12px; color: var(--text-muted);
+            text-transform: uppercase; letter-spacing: 0.05em; font-weight: 700;
+        }
+        .signal-bar { display: flex; gap: 8px; flex-wrap: wrap; }
+        .pill {
+            padding: 6px 14px; border-radius: 20px; font-size: 13px;
+            font-weight: 700; display: inline-flex; gap: 6px; align-items: center;
+        }
+        .pill .n { background: rgba(255,255,255,0.5); padding: 1px 8px; border-radius: 10px; }
+        .pill-buy { background: #d4edda; color: #155724; }
+        .pill-sell { background: #f8d7da; color: #721c24; }
+        .pill-hold { background: #fff3cd; color: #856404; }
+        .pill-neutral { background: #e2e3e5; color: #383d41; }
+
+        .kvs { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; font-size: 14px; }
+        .kvs .k { color: #888; }
+        .kvs .v { color: #1a1a2e; font-weight: 600; text-align: right; }
+
+        table { width: 100%; border-collapse: collapse; font-size: 13px; }
+        th, td { padding: 8px 10px; border-bottom: 1px solid #f0f0f0; text-align: left; }
+        th { color: #888; font-weight: 600; text-transform: uppercase; font-size: 11px; }
+        td.right, th.right { text-align: right; }
+        .sig-buy { color: #28a745; font-weight: 700; }
+        .sig-sell { color: #dc3545; font-weight: 700; }
+        .sig-hold, .sig-neutral { color: #6c757d; font-weight: 700; }
+
+        .ai-call {
+            background: linear-gradient(135deg, var(--primary) 0%, var(--accent) 100%);
+            border-radius: 16px; padding: 28px; color: #fff;
+            display: flex; align-items: center; gap: 24px; margin-bottom: 24px;
+            box-shadow: 0 10px 25px -5px rgba(79, 70, 229, 0.30);
+        }
+        .ai-call .icon { font-size: 48px; opacity: 0.9; }
+        .ai-call .text { flex: 1; }
+        .ai-call h2 { margin: 0 0 6px; font-size: 22px; font-weight: 700; letter-spacing: -0.02em; }
+        .ai-call p { margin: 0; opacity: 0.92; font-size: 14px; line-height: 1.5; }
+        .ai-btn {
+            background: #fff; color: var(--primary); border: none;
+            padding: 14px 28px; border-radius: 10px; font-weight: 700;
+            font-size: 15px; cursor: pointer; transition: all 0.15s;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+        }
+        .ai-btn:hover { transform: translateY(-2px); box-shadow: 0 8px 20px rgba(0,0,0,0.20); }
+        .ai-btn:disabled { opacity: 0.6; cursor: not-allowed; transform: none; }
+
+        .report {
+            background: #fff; border-radius: 12px; padding: 28px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.06); display: none;
+        }
+        .verdict-row {
+            display: flex; align-items: center; gap: 20px; margin-bottom: 24px;
+            flex-wrap: wrap; padding-bottom: 18px; border-bottom: 2px solid #f0f0f0;
+        }
+        .verdict-badge {
+            font-size: 28px; font-weight: 800; padding: 10px 24px; border-radius: 12px;
+        }
+        .vb-buy { background: #d4edda; color: #155724; }
+        .vb-sell { background: #f8d7da; color: #721c24; }
+        .vb-hold, .vb-neutral { background: #fff3cd; color: #856404; }
+        .vb-unknown { background: #e2e3e5; color: #383d41; }
+
+        .confidence { font-size: 14px; color: #555; }
+        .confidence b { color: #1a1a2e; }
+        .price-targets {
+            display: flex; gap: 12px; flex-wrap: wrap;
+        }
+        .price-target {
+            background: #f8f9fa; padding: 10px 16px; border-radius: 8px; text-align: center;
+            min-width: 110px;
+        }
+        .price-target .lbl { font-size: 11px; color: #888; text-transform: uppercase; }
+        .price-target .val { font-size: 18px; font-weight: 700; margin-top: 2px; }
+        .pt-entry .val { color: #4361ee; }
+        .pt-target .val { color: #28a745; }
+        .pt-stop .val { color: #dc3545; }
+
+        .section { margin-bottom: 18px; }
+        .section h4 {
+            font-size: 12px; color: #888; text-transform: uppercase;
+            letter-spacing: 0.5px; margin: 0 0 6px; font-weight: 700;
+        }
+        .section p {
+            margin: 0; font-size: 15px; line-height: 1.6; color: #333;
+            white-space: pre-wrap;
+        }
+
+        .loader { display: none; padding: 20px; text-align: center; color: #666; }
+        .loader.show { display: block; }
+        .spinner {
+            display: inline-block; width: 18px; height: 18px;
+            border: 3px solid #ddd; border-top-color: #4361ee;
+            border-radius: 50%; animation: spin 0.8s linear infinite;
+            margin-right: 8px; vertical-align: middle;
+        }
+        @keyframes spin { to { transform: rotate(360deg); } }
+
+        .err { color: #c0392b; background: #fde8e8; padding: 12px; border-radius: 8px; }
+        .back { color: #4361ee; text-decoration: none; font-size: 14px; }
+    </style>
+</head>
+<body style="background: #f0f4ff;">
+    <div class="tb-top">
+        <div class="tb-brand">
+            <a href="/">📈 Trading Signals</a>
+            <span class="slash">/</span>
+            <span class="ticker-chip">{{ overview.ticker }}</span>
+        </div>
+        <div class="tb-user">
+            <a href="{{ streamlit_url }}" target="_blank" rel="noopener">📊 Дашборд</a>
+            {% if current_user %}
+            <div class="user-chip">
+                <div class="tb-avatar">{{ current_user.username[0].upper() }}</div>
+                <a href="/auth/profile">{{ current_user.username }}</a>
+            </div>
+            <a href="/auth/logout">Выйти</a>
+            {% else %}
+            <a href="/auth/login" class="tb-btn">Войти</a>
+            {% endif %}
+        </div>
+    </div>
+
+    <div class="page">
+        <a href="/" class="back">← Все модели</a>
+
+        <div class="hdr">
+            <h1>{{ overview.ticker }}</h1>
+            {% if overview.current_price %}
+            <span class="price">{{ "%.2f"|format(overview.current_price) }} ₽</span>
+            {% endif %}
+            <span class="meta">FIGI: {{ overview.figi }} | моделей: {{ overview.models_count }}</span>
+        </div>
+
+        {% if overview.data_date or overview.prediction_date %}
+        <div style="display: flex; gap: 14px; margin-bottom: 20px; flex-wrap: wrap;">
+            {% if overview.data_date %}
+            <div style="background: var(--surface); border: 1px solid var(--border); padding: 8px 14px; border-radius: 10px; font-size: 13px;">
+                <span style="color: var(--text-muted); margin-right: 8px;">📅 Данные на:</span>
+                <b style="color: var(--text); font-variant-numeric: tabular-nums;">{{ overview.data_date }}</b>
+            </div>
+            {% endif %}
+            {% if overview.prediction_date %}
+            <div style="background: var(--primary-light); border: 1px solid #c7d2fe; padding: 8px 14px; border-radius: 10px; font-size: 13px;">
+                <span style="color: var(--primary); margin-right: 8px;">🎯 Прогноз на:</span>
+                <b style="color: var(--primary); font-variant-numeric: tabular-nums;">{{ overview.prediction_date }}</b>
+            </div>
+            {% endif %}
+            {% if overview.last_training_at %}
+            <div style="background: var(--surface-alt); padding: 8px 14px; border-radius: 10px; font-size: 13px;">
+                <span style="color: var(--text-muted); margin-right: 8px;">🕐 Последнее обучение:</span>
+                <b style="color: var(--text); font-variant-numeric: tabular-nums;">{{ overview.last_training_at[:16].replace('T',' ') }}</b>
+            </div>
+            {% endif %}
+        </div>
+        {% endif %}
+
+        {% if overview.models_count == 0 %}
+        <div class="card">
+            <div class="err">Нет данных моделей по этому тикеру. Запустите обучение: <code>make nightly-once</code></div>
+        </div>
+        {% else %}
+
+        <div class="ai-call">
+            <div class="icon">🤖</div>
+            <div class="text">
+                <h2>Получить отчёт от ИИ</h2>
+                <p>Сводный анализ на основе {{ overview.models_count }} моделей, технических индикаторов{% if overview.news_count %} и новостей{% else %} и (скоро) новостей{% endif %}. С рекомендацией цены входа, цели и стоп-лосса.</p>
+            </div>
+            <button class="ai-btn" onclick="getReport()" id="ai-btn">Запросить отчёт</button>
+        </div>
+
+        <div class="loader" id="loader"><span class="spinner"></span>Анализирую данные через LLM…</div>
+
+        <div class="report" id="report"></div>
+
+        <div class="summary-grid">
+            <div class="card">
+                <h3>Распределение сигналов</h3>
+                <div class="signal-bar">
+                    {% if overview.signals.BUY %}
+                    <span class="pill pill-buy">BUY <span class="n">{{ overview.signals.BUY }}</span></span>
+                    {% endif %}
+                    {% if overview.signals.SELL %}
+                    <span class="pill pill-sell">SELL <span class="n">{{ overview.signals.SELL }}</span></span>
+                    {% endif %}
+                    {% if overview.signals.HOLD %}
+                    <span class="pill pill-hold">HOLD <span class="n">{{ overview.signals.HOLD }}</span></span>
+                    {% endif %}
+                    {% if overview.signals.NEUTRAL %}
+                    <span class="pill pill-neutral">NEUTRAL <span class="n">{{ overview.signals.NEUTRAL }}</span></span>
+                    {% endif %}
+                </div>
+                <div style="margin-top: 18px;" class="kvs">
+                    {% if overview.r2_avg is not none %}
+                    <span class="k">Средний R²</span>
+                    <span class="v">{{ "%.3f"|format(overview.r2_avg) }}</span>
+                    {% endif %}
+                    {% if overview.direction_avg is not none %}
+                    <span class="k">Средняя Direction</span>
+                    <span class="v">{{ "%.1f"|format(overview.direction_avg) }}%</span>
+                    {% endif %}
+                </div>
+            </div>
+
+            <div class="card">
+                <h3>Технический анализ</h3>
+                {% if overview.ta %}
+                <div class="kvs">
+                    {% if overview.ta.rsi is not none %}
+                    <span class="k">RSI(14)</span>
+                    <span class="v">{{ "%.0f"|format(overview.ta.rsi) }}
+                        {% if overview.ta.rsi > 70 %}<small style="color:#dc3545">перекуплен</small>
+                        {% elif overview.ta.rsi < 30 %}<small style="color:#28a745">перепродан</small>
+                        {% endif %}
+                    </span>
+                    {% endif %}
+                    {% if overview.ta.macd is not none %}
+                    <span class="k">MACD</span>
+                    <span class="v">{{ "%.2f"|format(overview.ta.macd) }}</span>
+                    {% endif %}
+                    {% if overview.ta.stoch_k is not none %}
+                    <span class="k">Stochastic K</span>
+                    <span class="v">{{ "%.0f"|format(overview.ta.stoch_k) }}</span>
+                    {% endif %}
+                    {% if overview.ta.sma_5 is not none and overview.ta.sma_20 is not none %}
+                    <span class="k">SMA5 / SMA20</span>
+                    <span class="v">
+                        {{ "%.2f"|format(overview.ta.sma_5) }} / {{ "%.2f"|format(overview.ta.sma_20) }}
+                    </span>
+                    {% endif %}
+                    {% if overview.ta.bb_position is not none %}
+                    <span class="k">BB позиция</span>
+                    <span class="v">{{ "%.2f"|format(overview.ta.bb_position) }}</span>
+                    {% endif %}
+                    {% if overview.ta.last_high is not none and overview.ta.last_low is not none %}
+                    <span class="k">Диапазон вчера</span>
+                    <span class="v">
+                        <span style="color: var(--success);">{{ "%.2f"|format(overview.ta.last_high) }}</span>
+                        <span style="color: var(--text-muted);">/</span>
+                        <span style="color: var(--danger);">{{ "%.2f"|format(overview.ta.last_low) }}</span>
+                    </span>
+                    {% endif %}
+                </div>
+                {% else %}
+                <p style="color:#888">Недостаточно данных свечей для расчёта</p>
+                {% endif %}
+            </div>
+        </div>
+
+        <!-- ============================================== -->
+        <!-- НОВОЕ: История консолидированных AI-вердиктов  -->
+        <!-- ============================================== -->
+        <div class="x-card" style="margin-bottom: 20px;">
+            <h3 class="x-card-title">🎯 История AI-вердиктов (главная метрика)</h3>
+            <div id="ai-summary" style="margin-bottom: 16px;"></div>
+            <div id="ai-history-wrap" style="overflow-x: auto;">
+                <div style="text-align:center; padding: 40px 0; color: var(--text-muted);">
+                    <span class="x-spinner"></span> Загрузка…
+                </div>
+            </div>
+        </div>
+
+        <!-- ============================================== -->
+        <!-- Старая: история per-модельных прогнозов        -->
+        <!-- ============================================== -->
+        <div class="x-card" style="margin-bottom: 20px;">
+            <h3 class="x-card-title">📋 История предсказаний vs реальность <span style="font-weight:400; text-transform:none; color: var(--text-soft); letter-spacing:0;">(детали по моделям)</span></h3>
+
+            <div id="hit-rate-summary" style="margin-bottom: 18px;"></div>
+
+            <div style="display: flex; gap: 10px; margin-bottom: 16px; flex-wrap: wrap; align-items: center;">
+                <span class="x-card-title" style="margin: 0; font-size: 11px;">Период:</span>
+                <button onclick="loadHistory(30, this)" class="x-btn" data-days="30">30 дней</button>
+                <button onclick="loadHistory(60, this)" class="x-btn active" data-days="60">60 дней</button>
+                <button onclick="loadHistory(90, this)" class="x-btn" data-days="90">90 дней</button>
+                <button onclick="loadHistory(180, this)" class="x-btn" data-days="180">6 мес</button>
+
+                <span style="width: 1px; height: 24px; background: var(--border); margin: 0 4px;"></span>
+
+                <select id="filter-model" class="x-select" onchange="renderHistoryTable()">
+                    <option value="">Все модели</option>
+                </select>
+                <select id="filter-signal" class="x-select" onchange="renderHistoryTable()">
+                    <option value="">Все сигналы</option>
+                    <option value="BUY">BUY</option>
+                    <option value="SELL">SELL</option>
+                    <option value="HOLD">HOLD</option>
+                    <option value="NEUTRAL">NEUTRAL</option>
+                </select>
+                <label style="font-size: 12px; color: var(--text-muted); display:flex; align-items:center; gap:6px; cursor: pointer;">
+                    <input type="checkbox" id="filter-resolved" onchange="renderHistoryTable()" style="cursor: pointer;">
+                    только закрытые
+                </label>
+                <span id="history-summary" style="margin-left: auto; font-size: 12px; color: var(--text-muted);"></span>
+            </div>
+
+            <div id="history-table-wrap" style="overflow-x: auto;">
+                <div style="text-align: center; padding: 60px 0; color: var(--text-muted);">
+                    <span class="x-spinner"></span> Загрузка данных…
+                </div>
+            </div>
+        </div>
+
+        <style>
+            .diff-up { color: var(--success); font-weight: 600; }
+            .diff-down { color: var(--danger); font-weight: 600; }
+            .diff-zero { color: var(--text-muted); }
+        </style>
+
+        <div class="card">
+            <h3>Прогнозы по моделям ({{ overview.models_count }})</h3>
+            <div style="overflow-x: auto;">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Модель</th>
+                            <th>Сигнал</th>
+                            <th class="right">R²</th>
+                            <th class="right">Direction %</th>
+                            <th class="right">Прогноз цены</th>
+                            <th class="right">Ожид. изм. %</th>
+                            <th class="right">Win Rate</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for m in overview.models %}
+                        <tr>
+                            <td><b>{{ m.model_name }}</b></td>
+                            <td class="sig-{{ (m.signal or 'neutral')|lower }}">{{ m.signal or '—' }}</td>
+                            <td class="right">{{ "%.3f"|format(m.r2) if m.r2 is not none else '—' }}</td>
+                            <td class="right">{{ "%.1f"|format(m.direction_accuracy) if m.direction_accuracy is not none else '—' }}</td>
+                            <td class="right">{{ "%.2f"|format(m.predicted_price) if m.predicted_price is not none else '—' }}</td>
+                            <td class="right">{{ "%+.2f"|format(m.expected_change) if m.expected_change is not none else '—' }}</td>
+                            <td class="right">{{ "%.1f"|format(m.win_rate) if m.win_rate is not none else '—' }}</td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        {% endif %}
+    </div>
+
+    <script>
+        const TICKER = {{ overview.ticker|tojson }};
+        let HISTORY_DATA = null;  // последний загруженный набор данных
+
+        async function loadHistory(days, btnEl) {
+            document.querySelectorAll('.x-btn[data-days]').forEach(b => b.classList.remove('active'));
+            const targetBtn = btnEl
+                || document.querySelector(`.x-btn[data-days="${days}"]`);
+            if (targetBtn) targetBtn.classList.add('active');
+
+            const wrap = document.getElementById('history-table-wrap');
+            wrap.innerHTML = '<div style="text-align:center; padding: 60px 0; color: var(--text-muted);"><span class="x-spinner"></span> Загрузка…</div>';
+            document.getElementById('hit-rate-summary').innerHTML = '';
+
+            try {
+                const url = `/api/ticker/${encodeURIComponent(TICKER)}/predictions-history?days=${days}`;
+                const resp = await fetch(url);
+                if (!resp.ok) throw new Error('HTTP ' + resp.status);
+                const data = await resp.json();
+                if (data.error) {
+                    wrap.innerHTML = `<div class="err">${data.error}</div>`;
+                    return;
+                }
+                HISTORY_DATA = data;
+                updateModelFilterOptions(data);
+                renderHistoryTable();
+                renderHitRateSummary(data);
+            } catch (e) {
+                console.error('loadHistory error:', e);
+                wrap.innerHTML = `<div class="err">Ошибка загрузки: ${e.message}</div>`;
+            }
+        }
+
+        function updateModelFilterOptions(data) {
+            const sel = document.getElementById('filter-model');
+            const current = sel.value;
+            const models = [...new Set(data.predictions.map(p => p.model))].sort();
+            sel.innerHTML = '<option value="">Все модели</option>' +
+                models.map(m => `<option value="${m}">${m}</option>`).join('');
+            sel.value = current;
+        }
+
+        function renderHistoryTable() {
+            if (!HISTORY_DATA) return;
+            const wrap = document.getElementById('history-table-wrap');
+            const summary = document.getElementById('history-summary');
+
+            const modelFilter = document.getElementById('filter-model').value;
+            const signalFilter = document.getElementById('filter-signal').value;
+            const onlyResolved = document.getElementById('filter-resolved').checked;
+
+            // Сортировка: сначала свежие
+            let rows = [...HISTORY_DATA.predictions]
+                .sort((a, b) => b.date.localeCompare(a.date));
+
+            if (modelFilter) rows = rows.filter(r => r.model === modelFilter);
+            if (signalFilter) rows = rows.filter(r => (r.signal || '').toUpperCase() === signalFilter);
+            if (onlyResolved) rows = rows.filter(r => r.correct_direction !== null);
+
+            if (rows.length === 0) {
+                wrap.innerHTML = '<div style="text-align:center; color: var(--text-muted); padding:40px;">Нет данных с такими фильтрами</div>';
+                summary.textContent = '';
+                return;
+            }
+
+            const totalDays = new Set(HISTORY_DATA.predictions.map(p => p.date)).size;
+            const shownDays = new Set(rows.map(p => p.date)).size;
+            summary.innerHTML = `Показано: <b>${shownDays}</b> из ${totalDays} дней`;
+
+            let html = `<table class="x-table"><thead><tr>
+                <th>Дата</th>
+                <th>Модель</th>
+                <th class="center">Сигнал</th>
+                <th class="right">Было</th>
+                <th class="right">Предсказали</th>
+                <th class="right">Факт (close)</th>
+                <th class="right" title="Максимум и минимум следующего торгового дня">High / Low</th>
+                <th class="right">Прогноз %</th>
+                <th class="right">Факт %</th>
+                <th class="center">Направление</th>
+                <th class="center">LLM</th>
+            </tr></thead><tbody>`;
+
+            for (const r of rows) {
+                const sig = (r.signal || 'NEUTRAL').toUpperCase();
+                const sigClass = 'sig-' + sig.toLowerCase();
+
+                const cur = r.current_price;
+                const pred = r.predicted_price;
+                const fact = r.actual_next_close;
+
+                const diffPred = pred - cur;
+                const diffFact = (fact !== null) ? (fact - cur) : null;
+
+                const diffClass = (v) => v > 0 ? 'diff-up' : (v < 0 ? 'diff-down' : 'diff-zero');
+                const fmtDiffPct = (v) => v === null ? '—' :
+                    ((v >= 0 ? '+' : '') + (v / cur * 100).toFixed(2) + '%');
+
+                let verdict;
+                if (r.correct_direction === null) {
+                    verdict = '<span class="x-pill x-pill-muted">⏳ ждём</span>';
+                } else if (r.correct_direction) {
+                    verdict = '<span class="x-pill x-pill-success">✓ корректно</span>';
+                } else {
+                    verdict = '<span class="x-pill x-pill-danger">✗ некорректно</span>';
+                }
+
+                let llmCell = '<span class="text-mute">—</span>';
+                if (r.llm_signal === 'AGREE') {
+                    llmCell = '<span class="x-pill x-pill-success">✓ AGREE</span>';
+                } else if (r.llm_signal === 'DISAGREE') {
+                    llmCell = '<span class="x-pill x-pill-danger">✗ DISAGREE</span>';
+                } else if (r.llm_signal) {
+                    llmCell = '<span class="x-pill x-pill-muted">' + r.llm_signal + '</span>';
+                }
+
+                // High / Low следующего торгового дня
+                const high = r.actual_next_high;
+                const low = r.actual_next_low;
+                let hlCell = '<span class="text-mute">—</span>';
+                if (high !== null && low !== null && high !== undefined && low !== undefined) {
+                    // Подсветка: попал ли predicted_price в диапазон high/low?
+                    const inRange = pred >= low && pred <= high;
+                    const inRangeMark = inRange ? '<span class="x-pill x-pill-success" style="margin-left:4px;" title="Прогнозная цена находится в дневном диапазоне">✓</span>' : '';
+                    hlCell = `<span class="diff-up">${high.toFixed(2)}</span> <span class="text-mute">/</span> <span class="diff-down">${low.toFixed(2)}</span>${inRangeMark}`;
+                }
+
+                html += `<tr>
+                    <td><span class="text-mute">${r.date}</span></td>
+                    <td><b>${r.model}</b></td>
+                    <td class="center ${sigClass}">${sig}</td>
+                    <td class="right">${cur.toFixed(2)}</td>
+                    <td class="right">${pred.toFixed(2)}</td>
+                    <td class="right">${fact === null ? '<span class="text-mute">—</span>' : fact.toFixed(2)}</td>
+                    <td class="right" style="font-size:12px;">${hlCell}</td>
+                    <td class="right ${diffPred >= 0 ? 'diff-up' : 'diff-down'}">${fmtDiffPct(diffPred)}</td>
+                    <td class="right ${diffFact === null ? '' : diffClass(diffFact)}">${fmtDiffPct(diffFact)}</td>
+                    <td class="center">${verdict}</td>
+                    <td class="center">${llmCell}</td>
+                </tr>`;
+            }
+            html += '</tbody></table>';
+            wrap.innerHTML = html;
+        }
+
+        function renderHitRateSummary(data) {
+            const container = document.getElementById('hit-rate-summary');
+
+            // Счёт по дням
+            const allDates = data.predictions.map(p => p.date);
+            const totalDays = new Set(allDates).size;
+
+            const resolved = data.predictions.filter(p => p.correct_direction !== null);
+            const resolvedDays = new Set(resolved.map(p => p.date)).size;
+            const pendingDays = totalDays - resolvedDays;
+
+            const totalHits = resolved.filter(p => p.correct_direction).length;
+            const overallRate = resolved.length ? (totalHits / resolved.length * 100) : null;
+
+            // Топ модели
+            const stats = data.stats_per_model || [];
+            const sorted = [...stats].sort((a, b) => b.hit_rate - a.hit_rate);
+            const top = sorted[0];
+            const worst = sorted[sorted.length - 1];
+
+            if (resolved.length === 0) {
+                container.innerHTML = `
+                    <div class="x-stats-row">
+                        <div class="x-stat">
+                            <span class="x-stat-label">Дней с прогнозами</span>
+                            <span class="x-stat-value">${totalDays}</span>
+                            <span class="x-stat-sub">всего точек: ${data.predictions.length}</span>
+                        </div>
+                        <div class="x-stat">
+                            <span class="x-stat-label">Ожидают результата</span>
+                            <span class="x-stat-value amber">${pendingDays}</span>
+                            <span class="x-stat-sub">нет следующего торгового дня</span>
+                        </div>
+                        <div class="x-stat" style="grid-column: span 2;">
+                            <span class="x-stat-label">Статус</span>
+                            <span style="font-size: 13px; color: var(--text-muted); line-height: 1.5;">Ни один прогноз ещё не закрыт — нужно подождать следующий торговый день.</span>
+                        </div>
+                    </div>`;
+                return;
+            }
+
+            const overallClass = overallRate >= 55 ? 'green' : (overallRate >= 45 ? 'amber' : 'red');
+
+            container.innerHTML = `
+                <div class="x-stats-row">
+                    <div class="x-stat">
+                        <span class="x-stat-label">Дней с прогнозами</span>
+                        <span class="x-stat-value">${totalDays}</span>
+                        <span class="x-stat-sub">всего точек: ${data.predictions.length}</span>
+                    </div>
+                    <div class="x-stat">
+                        <span class="x-stat-label">Закрыто (дней)</span>
+                        <span class="x-stat-value">${resolvedDays}</span>
+                        <span class="x-stat-sub">точек: ${resolved.length}</span>
+                    </div>
+                    <div class="x-stat">
+                        <span class="x-stat-label">Ожидают</span>
+                        <span class="x-stat-value amber">${pendingDays}</span>
+                    </div>
+                    <div class="x-stat">
+                        <span class="x-stat-label">Корректных</span>
+                        <span class="x-stat-value green">${totalHits}</span>
+                        <span class="x-stat-sub">из ${resolved.length}</span>
+                    </div>
+                    <div class="x-stat">
+                        <span class="x-stat-label">Точность направления</span>
+                        <span class="x-stat-value ${overallClass}">${overallRate.toFixed(1)}%</span>
+                    </div>
+                    ${top ? `
+                    <div class="x-stat">
+                        <span class="x-stat-label">Лучшая модель</span>
+                        <span class="x-stat-value green" style="font-size: 18px;">${top.model}</span>
+                        <span class="x-stat-sub">${top.hit_rate}% (${top.hits}/${top.total})</span>
+                    </div>` : ''}
+                    ${worst && worst !== top ? `
+                    <div class="x-stat">
+                        <span class="x-stat-label">Худшая модель</span>
+                        <span class="x-stat-value red" style="font-size: 18px;">${worst.model}</span>
+                        <span class="x-stat-sub">${worst.hit_rate}% (${worst.hits}/${worst.total})</span>
+                    </div>` : ''}
+                </div>`;
+        }
+
+        // ============================================================
+        // История AI-вердиктов (главная метрика)
+        // ============================================================
+        async function loadAIHistory() {
+            const wrap = document.getElementById('ai-history-wrap');
+            const sum = document.getElementById('ai-summary');
+            wrap.innerHTML = '<div style="text-align:center; padding: 40px 0; color: var(--text-muted);"><span class="x-spinner"></span> Загрузка…</div>';
+            try {
+                const resp = await fetch(`/api/ticker/${encodeURIComponent(TICKER)}/ai-reports-history?days=60`);
+                if (!resp.ok) throw new Error('HTTP ' + resp.status);
+                const data = await resp.json();
+                if (data.error) {
+                    wrap.innerHTML = `<div class="err">${data.error}</div>`;
+                    return;
+                }
+                renderAISummary(data, sum);
+                renderAITable(data, wrap);
+            } catch (e) {
+                wrap.innerHTML = `<div class="err">Ошибка: ${e.message}</div>`;
+            }
+        }
+
+        function renderAISummary(data, el) {
+            if (data.total === 0) {
+                el.innerHTML = `<div style="padding: 16px; background: var(--surface-alt); border-radius: 10px; color: var(--text-muted); font-size: 13px;">
+                    Консолидированных AI-отчётов пока нет — будут создаваться ночным пайплайном (шаг 5/5).
+                    Запустить вручную: <code>make nightly-once</code>
+                </div>`;
+                return;
+            }
+            const accClass = data.accuracy === null ? '' :
+                (data.accuracy >= 55 ? 'green' : (data.accuracy >= 45 ? 'amber' : 'red'));
+            el.innerHTML = `
+                <div class="x-stats-row">
+                    <div class="x-stat">
+                        <span class="x-stat-label">Всего вердиктов</span>
+                        <span class="x-stat-value">${data.total}</span>
+                    </div>
+                    <div class="x-stat">
+                        <span class="x-stat-label">Закрыто</span>
+                        <span class="x-stat-value">${data.resolved}</span>
+                    </div>
+                    <div class="x-stat">
+                        <span class="x-stat-label">Корректных</span>
+                        <span class="x-stat-value green">${data.correct}</span>
+                        <span class="x-stat-sub">из ${data.resolved}</span>
+                    </div>
+                    <div class="x-stat">
+                        <span class="x-stat-label">Точность LLM</span>
+                        <span class="x-stat-value ${accClass}">${data.accuracy === null ? '—' : data.accuracy + '%'}</span>
+                    </div>
+                    <div class="x-stat">
+                        <span class="x-stat-label">Цель достигнута</span>
+                        <span class="x-stat-value green">${data.target_hits}</span>
+                        <span class="x-stat-sub">из ${data.resolved}</span>
+                    </div>
+                </div>`;
+        }
+
+        function renderAITable(data, wrap) {
+            if (data.items.length === 0) { wrap.innerHTML = ''; return; }
+
+            const verdictBadge = (v) => {
+                if (v === 'BUY')  return '<span class="x-pill x-pill-success">BUY</span>';
+                if (v === 'SELL') return '<span class="x-pill x-pill-danger">SELL</span>';
+                if (v === 'HOLD') return '<span class="x-pill x-pill-warning">HOLD</span>';
+                return `<span class="x-pill x-pill-muted">${v || 'UNKNOWN'}</span>`;
+            };
+            const directionBadge = (cd) => {
+                if (cd === null || cd === undefined) return '<span class="x-pill x-pill-muted">⏳ ждём</span>';
+                return cd ? '<span class="x-pill x-pill-success">✓ корректно</span>'
+                          : '<span class="x-pill x-pill-danger">✗ некорректно</span>';
+            };
+            const hitBadge = (h) => {
+                if (h === null || h === undefined) return '<span class="text-mute">—</span>';
+                return h ? '<span class="x-pill x-pill-success">✓</span>'
+                         : '<span class="x-pill x-pill-muted">✗</span>';
+            };
+            const fmt = (v) => v === null || v === undefined ? '—' : v.toFixed(2);
+
+            let html = `<table class="x-table"><thead><tr>
+                <th>Дата данных</th>
+                <th>Прогноз на</th>
+                <th class="center">Вердикт</th>
+                <th class="center">Уверенность</th>
+                <th class="right">Вход</th>
+                <th class="right">Цель</th>
+                <th class="right">Стоп</th>
+                <th class="right">Факт (close)</th>
+                <th class="right" title="High и Low дня прогноза">High / Low</th>
+                <th class="center">Направление</th>
+                <th class="center" title="Достигла ли цена target_price">Цель</th>
+                <th class="center" title="Сработал ли stop_loss">Стоп</th>
+            </tr></thead><tbody>`;
+
+            for (const it of data.items) {
+                const high = it.actual_high, low = it.actual_low;
+                const hlCell = (high !== null && low !== null)
+                    ? `<span class="diff-up">${high.toFixed(2)}</span> <span class="text-mute">/</span> <span class="diff-down">${low.toFixed(2)}</span>`
+                    : '<span class="text-mute">—</span>';
+
+                html += `<tr>
+                    <td><span class="text-mute">${it.data_date || '—'}</span></td>
+                    <td><b>${it.prediction_date || '—'}</b></td>
+                    <td class="center">${verdictBadge(it.verdict)}</td>
+                    <td class="center"><span class="text-mute">${it.confidence || '—'}</span></td>
+                    <td class="right">${fmt(it.entry_price)}</td>
+                    <td class="right" style="color: var(--success);">${fmt(it.target_price)}</td>
+                    <td class="right" style="color: var(--danger);">${fmt(it.stop_loss)}</td>
+                    <td class="right">${it.actual_close === null ? '<span class="text-mute">—</span>' : it.actual_close.toFixed(2)}</td>
+                    <td class="right" style="font-size:12px;">${hlCell}</td>
+                    <td class="center">${directionBadge(it.correct_direction)}</td>
+                    <td class="center">${hitBadge(it.target_hit)}</td>
+                    <td class="center">${hitBadge(it.stop_hit)}</td>
+                </tr>`;
+            }
+            html += '</tbody></table>';
+            wrap.innerHTML = html;
+        }
+
+        // Загрузка при открытии
+        function startTable() {
+            loadHistory(60);
+            loadAIHistory();
+        }
+        if (document.readyState === 'loading') {
+            document.addEventListener('DOMContentLoaded', startTable);
+        } else {
+            startTable();
+        }
+
+        async function getReport() {
+            const btn = document.getElementById('ai-btn');
+            const loader = document.getElementById('loader');
+            const reportEl = document.getElementById('report');
+
+            btn.disabled = true;
+            btn.textContent = 'Подождите…';
+            loader.classList.add('show');
+            reportEl.style.display = 'none';
+
+            try {
+                const resp = await fetch('/api/llm/ticker-report', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({ ticker: TICKER }),
+                });
+                const data = await resp.json();
+                loader.classList.remove('show');
+
+                if (data.error) {
+                    reportEl.innerHTML = '<div class="err">Ошибка LLM: ' + data.error + '</div>';
+                    reportEl.style.display = 'block';
+                } else {
+                    renderReport(data);
+                }
+            } catch (e) {
+                loader.classList.remove('show');
+                reportEl.innerHTML = '<div class="err">Сетевая ошибка: ' + e.message + '</div>';
+                reportEl.style.display = 'block';
+            }
+            btn.disabled = false;
+            btn.textContent = '🔁 Перезапросить';
+        }
+
+        function renderReport(d) {
+            const verdict = (d.verdict || 'UNKNOWN').toUpperCase();
+            const vClass = 'vb-' + verdict.toLowerCase();
+            const conf = d.confidence || '—';
+            const s = d.sections || {};
+
+            const fmt = (x) => x === null || x === undefined ? '—' : (Math.round(x * 100) / 100).toString();
+
+            const priceBlock = `
+                <div class="price-targets">
+                    <div class="price-target pt-entry">
+                        <div class="lbl">Цена входа</div>
+                        <div class="val">${fmt(d.entry_price)} ₽</div>
+                    </div>
+                    <div class="price-target pt-target">
+                        <div class="lbl">Цель</div>
+                        <div class="val">${fmt(d.target_price)} ₽</div>
+                    </div>
+                    <div class="price-target pt-stop">
+                        <div class="lbl">Стоп-лосс</div>
+                        <div class="val">${fmt(d.stop_loss)} ₽</div>
+                    </div>
+                </div>
+            `;
+
+            const sec = (title, val) => val ? `
+                <div class="section">
+                    <h4>${title}</h4>
+                    <p>${val.replace(/</g, '&lt;')}</p>
+                </div>
+            ` : '';
+
+            const reportEl = document.getElementById('report');
+            reportEl.innerHTML = `
+                <div class="verdict-row">
+                    <div class="verdict-badge ${vClass}">${verdict}</div>
+                    <div class="confidence">Уверенность: <b>${conf}</b></div>
+                    ${priceBlock}
+                </div>
+                ${sec('Консенсус моделей', s.consensus)}
+                ${sec('Технический анализ', s.technical)}
+                ${sec('Новостной фон', s.news)}
+                ${sec('Риски', s.risks)}
+                ${sec('Рекомендация', s.recommendation)}
+            `;
+            reportEl.style.display = 'block';
+        }
+    </script>
+</body>
+</html>

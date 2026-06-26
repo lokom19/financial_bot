@@ -32,14 +32,20 @@ class LightGBMTradeModelNew(BaseTradeModel):
         self.params = params or {
             'objective': 'regression',
             'boosting_type': 'gbdt',
-            'learning_rate': 0.03,
+            'learning_rate': 0.02,
+            # Ограничиваем рост деревьев — на финансовых данных
+            # больше 31-63 листьев почти всегда overfit
             'num_leaves': 31,
-            'max_depth': -1,
-            'n_estimators': 300,
-            'subsample': 0.8,
-            'colsample_bytree': 0.8,
+            'max_depth': 6,
+            'n_estimators': 800,
+            'min_data_in_leaf': 30,        # защита от шумовых сплитов
+            'feature_fraction': 0.8,       # =colsample_bytree в xgb
+            'bagging_fraction': 0.8,       # =subsample
+            'bagging_freq': 5,
+            'lambda_l1': 0.1,
+            'lambda_l2': 0.1,
             'random_state': random_state,
-            'verbose': -1
+            'verbose': -1,
         }
         self.model = None
 
@@ -48,9 +54,14 @@ class LightGBMTradeModelNew(BaseTradeModel):
 
     def _fit_model(self, X_train, y_train, X_val, y_val):
         self.model = self._create_model()
+        # callbacks для ранней остановки (новый API LightGBM 3.3+)
         self.model.fit(
             X_train, y_train,
             eval_set=[(X_val, y_val)],
+            callbacks=[
+                lgb.early_stopping(stopping_rounds=50, verbose=False),
+                lgb.log_evaluation(period=0),
+            ],
         )
         if self.feature_columns:
             self.feature_importances = pd.DataFrame({

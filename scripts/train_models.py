@@ -81,6 +81,11 @@ AVAILABLE_MODELS = {
         'function': 'main',
         'description': 'ARIMA Time Series'
     },
+    'arma_garch': {
+        'module': 'models.arma_garch_model',
+        'function': 'main',
+        'description': 'ARMA + GARCH(1,1) — среднее + волатильность'
+    },
     'rf_classifier': {
         'module': 'models.rf_classifier',
         'function': 'main',

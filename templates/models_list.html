@@ -4,79 +4,133 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Модели прогнозирования</title>
-    <link rel="stylesheet" href="/static/styles.css">
+    <link rel="stylesheet" href="/static/styles.css?v=4">
+    <style>
+        /* top-bar и базовые элементы вынесены в общий styles.css */
+        .page-content {
+            padding: 32px 28px;
+            max-width: 1280px;
+            margin: 0 auto;
+        }
+        .page-title {
+            font-size: 28px;
+            font-weight: 700;
+            color: var(--text);
+            margin-bottom: 6px;
+            letter-spacing: -0.025em;
+        }
+        .page-subtitle {
+            color: var(--text-muted);
+            font-size: 14px;
+            margin-bottom: 28px;
+        }
+        #time-info { color: var(--text-soft); font-size: 12px; }
+    </style>
 </head>
 <body>
-    <div class="header">
-        <div class="header-title">
-            <h1>Модели прогнозирования</h1>
-            <span id="time-info">Последнее обновление: ...</span>
+    <!-- Top navigation bar -->
+    <div class="tb-top">
+        <div class="tb-brand">
+            <span>📈</span> Trading Signals
+        </div>
+        <div class="tb-user">
+            <a href="{{ streamlit_url }}" target="_blank" rel="noopener" title="Открыть Streamlit-дашборд">📊 Дашборд</a>
+            {% if current_user %}
+            <div class="user-chip">
+                <div class="tb-avatar">{{ current_user.username[0].upper() }}</div>
+                <a href="/auth/profile">{{ current_user.username }}</a>
+            </div>
+            <a href="/auth/logout">Выйти</a>
+            {% else %}
+            <a href="/auth/register">Регистрация</a>
+            <a href="/auth/login" class="tb-btn">Войти</a>
+            {% endif %}
         </div>
     </div>
 
-    <div class="models-container">
-        {% if models_info %}
-            {% for model in models_info %}
-                <div class="model-card">
-                    <div class="model-header">
-                        <h2>{{ model.name }}</h2>
-                        <span class="file-count">{{ model.total_files }} файлов</span>
-                    </div>
-                    <div class="model-stats">
-                        <div class="stat-item buy">
-                            <span class="stat-label">BUY</span>
-                            <span class="stat-value">{{ model.signals.BUY }}</span>
-                        </div>
-                        <div class="stat-item sell">
-                            <span class="stat-label">SELL</span>
-                            <span class="stat-value">{{ model.signals.SELL }}</span>
-                        </div>
-                        <div class="stat-item hold">
-                            <span class="stat-label">HOLD</span>
-                            <span class="stat-value">{{ model.signals.HOLD }}</span>
-                        </div>
-                        <div class="stat-item neutral">
-                            <span class="stat-label">NEUTRAL</span>
-                            <span class="stat-value">{{ model.signals.NEUTRAL }}</span>
-                        </div>
-                    </div>
-                    <div class="model-footer">
-                        <a href="/model/{{ model.name }}" class="model-link">Просмотреть результаты</a>
-                    </div>
-                </div>
-            {% endfor %}
-        {% else %}
-            <div class="empty-message">
-                <h2>Нет доступных моделей</h2>
-                <p>Создайте директории моделей в папке "models" и добавьте в них файлы результатов.</p>
-                <a href="/create-sample-data" class="action-button">Создать пример структуры</a>
+    <div class="page-content">
+        <div class="page-title">Модели прогнозирования</div>
+        <div class="page-subtitle">
+            Результаты обучения ML и DL моделей по биржевым инструментам &nbsp;|&nbsp;
+            <span id="time-info">...</span>
+        </div>
+
+        {% if tickers_list %}
+        <div style="background: linear-gradient(135deg, #4f46e5 0%, #7c3aed 100%); border-radius: 16px; padding: 24px 28px; margin-bottom: 28px; color: #fff; box-shadow: 0 10px 25px -5px rgba(79, 70, 229, 0.30);">
+            <div style="font-size: 12px; opacity: 0.85; text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 8px; font-weight: 600;">🤖 AI-отчёт по тикеру</div>
+            <div style="font-size: 14px; opacity: 0.95; margin-bottom: 16px; line-height: 1.5;">
+                Развёрнутый анализ от LLM на основе всех моделей + технического анализа.
+                Включает рекомендации по цене входа, цели и стоп-лоссу.
             </div>
+            <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+                {% for t in tickers_list %}
+                <a href="/ticker/{{ t.ticker }}"
+                   style="background: rgba(255,255,255,0.16); color: #fff; padding: 9px 18px; border-radius: 999px; text-decoration: none; font-weight: 600; font-size: 14px; transition: all 0.2s; backdrop-filter: blur(4px);"
+                   onmouseover="this.style.background='rgba(255,255,255,0.32)';this.style.transform='translateY(-1px)'"
+                   onmouseout="this.style.background='rgba(255,255,255,0.16)';this.style.transform='translateY(0)'">
+                    {{ t.ticker }}
+                </a>
+                {% endfor %}
+            </div>
+        </div>
         {% endif %}
+
+        <div class="models-container">
+            {% if models_info %}
+                {% for model in models_info %}
+                    <div class="model-card">
+                        <div class="model-header">
+                            <h2>{{ model.name }}</h2>
+                            <span class="file-count">{{ model.total_files }} тикеров</span>
+                        </div>
+                        <div class="model-stats">
+                            <div class="stat-item buy">
+                                <span class="stat-label">BUY</span>
+                                <span class="stat-value">{{ model.signals.BUY }}</span>
+                            </div>
+                            <div class="stat-item sell">
+                                <span class="stat-label">SELL</span>
+                                <span class="stat-value">{{ model.signals.SELL }}</span>
+                            </div>
+                            <div class="stat-item hold">
+                                <span class="stat-label">HOLD</span>
+                                <span class="stat-value">{{ model.signals.HOLD }}</span>
+                            </div>
+                            <div class="stat-item neutral">
+                                <span class="stat-label">NEUTRAL</span>
+                                <span class="stat-value">{{ model.signals.NEUTRAL }}</span>
+                            </div>
+                        </div>
+                        {% if model.avg_r2 is not none %}
+                        <div style="padding: 8px 16px; font-size: 13px; color: #555; border-top: 1px solid #f0f0f0;">
+                            R²: <b>{{ "%.3f"|format(model.avg_r2) }}</b>
+                            &nbsp;|&nbsp;
+                            Direction: <b>{{ "%.1f"|format(model.avg_direction) }}%</b>
+                            &nbsp;|&nbsp;
+                            Дата: <b>{{ model.latest_date[:10] }}</b>
+                        </div>
+                        {% endif %}
+                        <div class="model-footer">
+                            <a href="/model/{{ model.name }}" class="model-link">Просмотреть результаты</a>
+                        </div>
+                    </div>
+                {% endfor %}
+            {% else %}
+                <div class="empty-message">
+                    <h2>Нет доступных моделей</h2>
+                    <p>Запустите обучение моделей: <code>make train</code></p>
+                </div>
+            {% endif %}
+        </div>
     </div>
 
     <script>
-        // Функция для обновления текущего времени
         function updateTime() {
             const now = new Date();
-            const options = {
-                year: 'numeric',
-                month: 'long',
-                day: 'numeric',
-                hour: '2-digit',
-                minute: '2-digit',
-                second: '2-digit'
-            };
-            const timeString = now.toLocaleString(undefined, options);
-            const timeInfo = document.getElementById('time-info');
-            if (timeInfo) {
-                timeInfo.textContent = `Последнее обновление: ${timeString}`;
-            }
+            document.getElementById('time-info').textContent =
+                'Обновлено: ' + now.toLocaleString('ru-RU');
         }
-
-        // Инициализация страницы
-        window.onload = function() {
-            updateTime();
-        };
+        updateTime();
     </script>
 </body>
 </html>

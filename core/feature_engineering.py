@@ -214,6 +214,50 @@ def _add_momentum_features(df: pd.DataFrame) -> pd.DataFrame:
     for periods in [5, 10, 20]:
         df[f'roc_{periods}'] = (df['close'] / df['close'].shift(periods) - 1) * 100
 
+    # =================================================================
+    # Direction-focused features — нацелены на повышение Direction Accuracy.
+    # Эти признаки нелинейны относительно цены и помогают модели уйти
+    # от тривиального "predict close ≈ previous close".
+    # =================================================================
+
+    # Williams %R (-100..0): обратный стохастик, силён в зонах разворотов
+    high_max_w = df['high'].rolling(window=14).max()
+    low_min_w = df['low'].rolling(window=14).min()
+    denom_w = (high_max_w - low_min_w).replace(0, np.nan)
+    df['williams_r_14'] = -100 * (high_max_w - df['close']) / denom_w
+
+    # CCI (Commodity Channel Index) — измеряет отклонение от среднего
+    typical = (df['high'] + df['low'] + df['close']) / 3
+    sma_tp = typical.rolling(window=20).mean()
+    mad = typical.rolling(window=20).apply(
+        lambda x: np.mean(np.abs(x - x.mean())), raw=True
+    )
+    df['cci_20'] = (typical - sma_tp) / (0.015 * mad.replace(0, np.nan))
+
+    # Returns + z-score (направление с учётом волатильности)
+    ret_1 = df['close'].pct_change(1)
+    df['return_1'] = ret_1
+    ret_mean_20 = ret_1.rolling(window=20).mean()
+    ret_std_20 = ret_1.rolling(window=20).std()
+    df['return_z_20'] = (ret_1 - ret_mean_20) / ret_std_20.replace(0, np.nan)
+
+    # Direction streak — сколько подряд дней растёт/падает.
+    # Знак подсказывает текущий тренд, абсолютная величина — его силу.
+    diff_sign = np.sign(df['close'].diff()).fillna(0)
+    streak = (diff_sign * (diff_sign.groupby(
+        (diff_sign != diff_sign.shift()).cumsum()
+    ).cumcount() + 1)).astype(float)
+    df['direction_streak'] = streak
+
+    # Gap (open vs prev close) — overnight движение, хороший предиктор открытия
+    df['gap_open'] = (df['open'] - df['close'].shift(1)) / df['close'].shift(1) * 100
+
+    # Position в диапазоне последних N дней (close vs N-day high/low)
+    for window in [10, 20]:
+        h = df['high'].rolling(window=window).max()
+        l = df['low'].rolling(window=window).min()
+        df[f'range_position_{window}'] = (df['close'] - l) / (h - l).replace(0, np.nan)
+
     return df
 
 

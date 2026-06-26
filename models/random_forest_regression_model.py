@@ -37,18 +37,23 @@ class RandomForestTradeModelNew(SklearnTradeModel):
 
     def __init__(
         self,
-        n_estimators: int = 100,
-        max_depth: int = None,
-        min_samples_split: int = 2,
-        min_samples_leaf: int = 1,
+        n_estimators: int = 300,
+        # Финансовые ряды шумные → жёстче ограничиваем глубину и листья,
+        # чтобы лес не запомнил тренировочные данные.
+        max_depth: int = 8,
+        min_samples_split: int = 10,
+        min_samples_leaf: int = 5,
+        # 'sqrt' уменьшает корреляцию между деревьями (классика для RF)
+        max_features: str = "sqrt",
         test_size: float = 0.2,
-        random_state: int = 42
+        random_state: int = 42,
     ):
         super().__init__(test_size=test_size, random_state=random_state)
         self.n_estimators = n_estimators
         self.max_depth = max_depth
         self.min_samples_split = min_samples_split
         self.min_samples_leaf = min_samples_leaf
+        self.max_features = max_features
 
     def _create_model(self) -> RandomForestRegressor:
         return RandomForestRegressor(
@@ -56,8 +61,9 @@ class RandomForestTradeModelNew(SklearnTradeModel):
             max_depth=self.max_depth,
             min_samples_split=self.min_samples_split,
             min_samples_leaf=self.min_samples_leaf,
+            max_features=self.max_features,
             random_state=self.random_state,
-            n_jobs=-1
+            n_jobs=-1,
         )
 
 

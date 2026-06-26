@@ -4,7 +4,7 @@ import warnings
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
-from sklearn.metrics import mean_absolute_error, mean_squared_error
+from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
 from statsmodels.tsa.arima.model import ARIMA
 from statsmodels.tsa.seasonal import seasonal_decompose
 from statsmodels.tsa.stattools import adfuller
@@ -290,6 +290,15 @@ def calculate_prediction_metrics(actual, predicted):
     mae = mean_absolute_error(actual, predicted)
     rmse = np.sqrt(mean_squared_error(actual, predicted))
 
+    # R² — обязательная метрика, ранее не считалась
+    try:
+        r2 = r2_score(actual, predicted)
+    except Exception:
+        r2 = None
+
+    # MSE
+    mse = mean_squared_error(actual, predicted)
+
     # MAPE can cause division by zero errors
     try:
         mape = np.mean(np.abs((actual - predicted) / actual)) * 100
@@ -302,8 +311,10 @@ def calculate_prediction_metrics(actual, predicted):
     directional_accuracy = np.mean((actual_diff > 0) == (pred_diff > 0)) * 100
 
     return {
+        'mse': mse,
         'mae': mae,
         'rmse': rmse,
+        'r2': r2,
         'mape': mape,
         'directional_accuracy': directional_accuracy
     }
@@ -667,21 +678,38 @@ def main(db_path):
     result = asyncio.run(predict_stock_with_arima(db_path=db_path, visualize=False))
 
     # Print results in format compatible with train_models.py metric extraction
-    if 'error' not in result or result.get('prediction'):
-        pred = result.get('prediction', {})
+    if 'error' not in result:
         metrics = result.get('metrics', {})
 
-        print(f"\nТекущая цена: {pred.get('last_price', 0):.4f}")
-        print(f"Прогнозируемая цена: {pred.get('price', 0):.4f}")
-        print(f"Ожидаемое изменение: {pred.get('change_percent', 0):.2f}%")
-        print(f"Торговый сигнал: {pred.get('signal', 'NEUTRAL')}")
+        last_price = result.get('last_price', 0) or 0
+        forecast_price = result.get('forecast_price', 0) or 0
+        change_pct = result.get('price_change_percent', 0) or 0
+
+        # Торговый сигнал на основе прогноза (как у других моделей)
+        if change_pct >= 0.5:
+            signal = "BUY"
+        elif change_pct <= -0.5:
+            signal = "SELL"
+        elif abs(change_pct) < 0.1:
+            signal = "NEUTRAL"
+        else:
+            signal = "HOLD"
+
+        print(f"\nТекущая цена: {last_price:.4f}")
+        print(f"Прогнозируемая цена: {forecast_price:.4f}")
+        print(f"Ожидаемое изменение: {change_pct:+.2f}%")
+        print(f"Торговый сигнал: {signal}")
 
         if metrics:
             print(f"\nМетрики модели:")
-            if metrics.get('mae') is not None:
-                print(f"MAE: {metrics['mae']:.6f}")
+            if metrics.get('mse') is not None:
+                print(f"MSE: {metrics['mse']:.6f}")
             if metrics.get('rmse') is not None:
                 print(f"RMSE: {metrics['rmse']:.6f}")
+            if metrics.get('mae') is not None:
+                print(f"MAE: {metrics['mae']:.6f}")
+            if metrics.get('r2') is not None:
+                print(f"R²: {metrics['r2']:.6f}")
             if metrics.get('mape') is not None:
                 print(f"MAPE: {metrics['mape']:.2f}")
             if metrics.get('directional_accuracy') is not None:

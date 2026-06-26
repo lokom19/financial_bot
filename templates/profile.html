@@ -1,0 +1,132 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Личный кабинет — Trading Signals</title>
+    <link rel="stylesheet" href="/static/styles.css?v=4">
+    <style>
+        .profile-container { max-width: 560px; margin: 48px auto; }
+        .profile-card {
+            background: #fff; border-radius: 12px;
+            box-shadow: 0 4px 24px rgba(0,0,0,0.08); padding: 40px;
+        }
+        .profile-header {
+            display: flex; align-items: center; gap: 20px; margin-bottom: 32px;
+        }
+        .avatar {
+            width: 72px; height: 72px; border-radius: 50%;
+            background: linear-gradient(135deg, #4361ee, #7b2fbe);
+            display: flex; align-items: center; justify-content: center;
+            font-size: 28px; color: #fff; font-weight: 700; flex-shrink: 0;
+        }
+        .profile-name { font-size: 22px; font-weight: 700; color: #1a1a2e; }
+        .profile-email { color: #666; font-size: 14px; margin-top: 4px; }
+        .badge {
+            display: inline-block; padding: 2px 10px; border-radius: 20px;
+            font-size: 11px; font-weight: 600; margin-top: 6px;
+        }
+        .badge-admin { background: #fde8f5; color: #7b2fbe; }
+        .badge-user { background: #e8f0fe; color: #4361ee; }
+        .section-title {
+            font-size: 16px; font-weight: 700; color: #333;
+            margin-bottom: 16px; padding-bottom: 8px;
+            border-bottom: 2px solid #f0f0f0;
+        }
+        .info-row {
+            display: flex; justify-content: space-between;
+            padding: 10px 0; border-bottom: 1px solid #f5f5f5;
+            font-size: 14px;
+        }
+        .info-label { color: #666; }
+        .info-value { color: #1a1a2e; font-weight: 600; }
+        .form-group { margin-bottom: 16px; }
+        .form-group label { display: block; font-weight: 600; margin-bottom: 6px; color: #333; font-size: 14px; }
+        .form-group input {
+            width: 100%; padding: 10px 14px; border: 1.5px solid #ddd;
+            border-radius: 8px; font-size: 15px; box-sizing: border-box;
+            outline: none; transition: border-color 0.2s;
+        }
+        .form-group input:focus { border-color: #4361ee; }
+        .btn-primary {
+            padding: 10px 24px; background: #4361ee; color: #fff;
+            border: none; border-radius: 8px; font-size: 15px; font-weight: 600;
+            cursor: pointer; transition: background 0.2s;
+        }
+        .btn-primary:hover { background: #3650d8; }
+        .btn-secondary {
+            padding: 10px 24px; background: #f0f0f0; color: #555;
+            border: none; border-radius: 8px; font-size: 15px; font-weight: 600;
+            cursor: pointer; text-decoration: none; display: inline-block;
+            transition: background 0.2s;
+        }
+        .btn-secondary:hover { background: #e0e0e0; }
+        .alert-success {
+            background: #d4edda; border: 1px solid #c3e6cb; border-radius: 8px;
+            padding: 10px 14px; color: #155724; margin-bottom: 18px; font-size: 14px;
+        }
+        .alert-error {
+            background: #fde8e8; border: 1px solid #f5c6c6; border-radius: 8px;
+            padding: 10px 14px; color: #c0392b; margin-bottom: 18px; font-size: 14px;
+        }
+        .back-link { color: #4361ee; text-decoration: none; font-size: 14px; display: inline-flex; align-items: center; gap: 4px; margin-bottom: 16px; }
+        .back-link:hover { text-decoration: underline; }
+    </style>
+</head>
+<body style="background: #f0f4ff; min-height: 100vh; padding: 20px;">
+    <div class="profile-container">
+        <a href="/" class="back-link">← Вернуться к моделям</a>
+
+        <div class="profile-card">
+            <div class="profile-header">
+                <div class="avatar">{{ user.username[0].upper() }}</div>
+                <div>
+                    <div class="profile-name">{{ user.full_name or user.username }}</div>
+                    <div class="profile-email">{{ user.email }}</div>
+                    <span class="badge {% if user.is_admin %}badge-admin{% else %}badge-user{% endif %}">
+                        {% if user.is_admin %}Администратор{% else %}Пользователь{% endif %}
+                    </span>
+                </div>
+            </div>
+
+            <div class="section-title">Информация об аккаунте</div>
+            <div class="info-row">
+                <span class="info-label">Имя пользователя</span>
+                <span class="info-value">{{ user.username }}</span>
+            </div>
+            <div class="info-row">
+                <span class="info-label">Дата регистрации</span>
+                <span class="info-value">{{ user.created_at.strftime('%d.%m.%Y') if user.created_at else '—' }}</span>
+            </div>
+            <div class="info-row" style="margin-bottom: 32px;">
+                <span class="info-label">Последний вход</span>
+                <span class="info-value">{{ user.last_login.strftime('%d.%m.%Y %H:%M') if user.last_login else '—' }}</span>
+            </div>
+
+            <div class="section-title">Редактировать профиль</div>
+
+            {% if success %}
+            <div class="alert-success">{{ success }}</div>
+            {% endif %}
+            {% if error %}
+            <div class="alert-error">{{ error }}</div>
+            {% endif %}
+
+            <form method="post" action="/auth/profile">
+                <div class="form-group">
+                    <label>Полное имя</label>
+                    <input type="text" name="full_name" value="{{ user.full_name or '' }}" placeholder="Иван Иванов">
+                </div>
+                <div class="form-group">
+                    <label>Email</label>
+                    <input type="email" name="email" value="{{ user.email }}" required>
+                </div>
+                <div style="display: flex; gap: 12px; align-items: center; margin-top: 8px;">
+                    <button type="submit" class="btn-primary">Сохранить</button>
+                    <a href="/auth/logout" class="btn-secondary">Выйти</a>
+                </div>
+            </form>
+        </div>
+    </div>
+</body>
+</html>

@@ -2,25 +2,23 @@ FROM python:3.10-slim
 
 WORKDIR /app
 
-# Установка системных зависимостей
+# Системные зависимости
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    gcc \
-    git \
+        gcc g++ git curl \
+        libpq-dev \
+        tzdata \
     && rm -rf /var/lib/apt/lists/*
 
-# Установка зависимостей
-# Используем requirements-docker.txt для Docker (без проблемных пакетов)
+# Установка Python-зависимостей
 COPY requirements-docker.txt .
-RUN pip install --no-cache-dir -r requirements-docker.txt
+RUN pip install --no-cache-dir --upgrade pip \
+    && pip install --no-cache-dir -r requirements-docker.txt
 
 # Копирование исходного кода
 COPY . .
 
-# Создание необходимых директорий
-#RUN mkdir -p /app/templates /app/static /app/output
+# Порт FastAPI
+EXPOSE 8002
 
-# Открытие порта
-EXPOSE 8000
-
-# Запуск приложения
-CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]
+# Дефолтная команда — можно переопределить из docker-compose
+CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8002"]

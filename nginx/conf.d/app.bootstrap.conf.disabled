@@ -1,0 +1,25 @@
+# Bootstrap-конфиг для ПЕРВОГО запуска без HTTPS.
+# Используется только чтобы получить сертификат Let's Encrypt.
+# После получения сертификата файл удаляется, активным становится app.conf.
+#
+# Чтобы активировать:
+#   mv nginx/conf.d/app.conf nginx/conf.d/app.conf.disabled
+#   mv nginx/conf.d/app.bootstrap.conf.disabled nginx/conf.d/app.conf
+#   docker compose restart nginx
+
+upstream arima_app_bootstrap { server app:8002; }
+
+server {
+    listen 80;
+    server_name vm123123new.firstbyte.club;
+
+    location /.well-known/acme-challenge/ {
+        root /var/www/certbot;
+    }
+
+    location / {
+        proxy_pass http://arima_app_bootstrap;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+    }
+}

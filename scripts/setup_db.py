@@ -116,6 +116,9 @@ def setup_database():
                 ("win_rate", "FLOAT"),
                 ("profit_factor", "FLOAT"),
                 ("cumulative_return", "FLOAT"),
+                ("llm_signal", "VARCHAR(20)"),
+                ("llm_reasoning", "TEXT"),
+                ("llm_processed_at", "TIMESTAMP"),
             ]
             for col_name, col_type in new_columns:
                 try:
@@ -146,8 +149,64 @@ def setup_database():
                 CREATE INDEX IF NOT EXISTS idx_model_results_signal
                 ON public.model_results(trading_signal);
             """))
+            conn.execute(text("""
+                CREATE INDEX IF NOT EXISTS idx_model_results_llm_pending
+                ON public.model_results(llm_processed_at)
+                WHERE llm_processed_at IS NULL;
+            """))
             conn.commit()
             print("   ✓ Indexes created")
+
+            # ============================================================
+            # Ticker AI reports (одна запись на тикер на день)
+            # ============================================================
+            print("\n4. Creating ticker_reports table...")
+            conn.execute(text("""
+                CREATE TABLE IF NOT EXISTS public.ticker_reports (
+                    id SERIAL PRIMARY KEY,
+                    figi VARCHAR(64) NOT NULL,
+                    ticker VARCHAR(20),
+                    timestamp TIMESTAMP NOT NULL,
+                    data_date DATE,
+                    prediction_date DATE,
+
+                    current_price FLOAT,
+
+                    verdict VARCHAR(20),
+                    confidence VARCHAR(20),
+                    entry_price FLOAT,
+                    target_price FLOAT,
+                    stop_loss FLOAT,
+                    reasoning TEXT,
+
+                    sections_json TEXT,
+                    models_snapshot_json TEXT,
+                    ta_snapshot_json TEXT,
+
+                    actual_close FLOAT,
+                    actual_high FLOAT,
+                    actual_low FLOAT,
+                    actual_resolved_at TIMESTAMP,
+                    correct_direction BOOLEAN,
+                    target_hit BOOLEAN,
+                    stop_hit BOOLEAN
+                );
+            """))
+            conn.execute(text("""
+                CREATE INDEX IF NOT EXISTS idx_ticker_reports_figi
+                ON public.ticker_reports(figi);
+            """))
+            conn.execute(text("""
+                CREATE INDEX IF NOT EXISTS idx_ticker_reports_ts
+                ON public.ticker_reports(timestamp DESC);
+            """))
+            conn.execute(text("""
+                CREATE INDEX IF NOT EXISTS idx_ticker_reports_unresolved
+                ON public.ticker_reports(prediction_date)
+                WHERE actual_close IS NULL;
+            """))
+            conn.commit()
+            print("   ✓ Table ticker_reports + indexes created")
 
             # Verify setup
             print("\n4. Verifying setup...")

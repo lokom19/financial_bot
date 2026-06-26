@@ -45,12 +45,15 @@ class RidgeTradeModel(SklearnTradeModel):
     REQUIRED_FEATURES = {FeatureSet.BASIC, FeatureSet.VOLUME, FeatureSet.VOLATILITY, FeatureSet.MOMENTUM}
     MODEL_NAME = "ridge"
 
-    def __init__(self, alpha: float = 5.0, test_size: float = 0.2, random_state: int = 42):
+    # alpha=15 — наши TA-фичи (SMA/EMA/RSI/ATR) сильно скоррелированы между собой;
+    # повышенная L2 регуляризация уменьшает чувствительность к мультиколлинеарности.
+    def __init__(self, alpha: float = 15.0, test_size: float = 0.2, random_state: int = 42):
         super().__init__(test_size=test_size, random_state=random_state)
         self.alpha = alpha
 
     def _create_model(self) -> Ridge:
-        return Ridge(alpha=self.alpha, solver='auto')
+        # solver='svd' — устойчивее при плохой обусловленности матрицы
+        return Ridge(alpha=self.alpha, solver='svd')
 
 
 # ============================================================

@@ -1,9 +1,0 @@
-{
-  "permissions": {
-    "allow": [
-      "Bash(find:*)",
-      "Read(//Users/vladimirmakeev/PycharmProjects/arima/**)",
-      "Bash(sort:*)"
-    ]
-  }
-}

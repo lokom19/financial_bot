@@ -12,11 +12,15 @@ from typing import Optional
 
 load_dotenv()
 
-DB_HOST = os.getenv("DB_HOST") # "localhost"  # Change this to your database host
-DB_PORT = os.getenv("DB_PORT")  # "5432"  # Default PostgreSQL port
-DB_NAME = os.getenv("DB_NAME")    # "postgres"  # Change to your database name
-DB_USER = os.getenv("DB_USER")      # "postgres"  # Change to your username
-DB_PASSWORD = os.getenv("DB_PASSWORD")    # "mysecretpassword"  # Change to your password
+def _env(key, default=''):
+    val = os.getenv(key, default)
+    return str(val).split('#')[0].strip().strip('"').strip("'").strip()
+
+DB_HOST = _env("DB_HOST", "localhost")
+DB_PORT = _env("DB_PORT", "5432")
+DB_NAME = _env("DB_NAME", "postgres")
+DB_USER = _env("DB_USER", "postgres")
+DB_PASSWORD = _env("DB_PASSWORD", "")
 DATABASE_URL = f"postgresql://{DB_USER}:{DB_PASSWORD}@{DB_HOST}:{DB_PORT}/{DB_NAME}"
 
 engine = create_engine(DATABASE_URL)
@@ -78,11 +82,11 @@ from typing import Optional
 
 load_dotenv()
 
-DB_HOST = os.getenv("DB_HOST") # "localhost"  # Change this to your database host
-DB_PORT = os.getenv("DB_PORT")  # "5432"  # Default PostgreSQL port
-DB_NAME = os.getenv("DB_NAME")    # "postgres"  # Change to your database name
-DB_USER = os.getenv("DB_USER")      # "postgres"  # Change to your username
-DB_PASSWORD = os.getenv("DB_PASSWORD")    # "mysecretpassword"  # Change to your password
+DB_HOST = _env("DB_HOST", "localhost")
+DB_PORT = _env("DB_PORT", "5432")
+DB_NAME = _env("DB_NAME", "postgres")
+DB_USER = _env("DB_USER", "postgres")
+DB_PASSWORD = _env("DB_PASSWORD", "")
 DATABASE_URL = f"postgresql://{DB_USER}:{DB_PASSWORD}@{DB_HOST}:{DB_PORT}/{DB_NAME}"
 
 engine = create_engine(DATABASE_URL)

@@ -27,6 +27,7 @@ from dotenv import load_dotenv
 try:
     from apscheduler.schedulers.blocking import BlockingScheduler
     from apscheduler.triggers.interval import IntervalTrigger
+    from apscheduler.triggers.cron import CronTrigger
 except ImportError:
     print("APScheduler not installed. Run: pip install apscheduler")
     sys.exit(1)
@@ -108,6 +109,13 @@ class PipelineRunner:
             "Model training"
         )
 
+    def run_nightly(self, walk_forward: bool = False) -> bool:
+        """Ночной пайплайн: train top-3 + LLM-валидация."""
+        cmd = ["python", "scripts/nightly_pipeline.py"]
+        if walk_forward:
+            cmd.append("--walk-forward")
+        return self.run_command(cmd, "Nightly pipeline (top-3 + LLM)")
+
     def run_pipeline(self):
         """Run the full pipeline: data collection → training."""
         if self.is_running:
@@ -183,19 +191,71 @@ def main():
         action="store_true",
         help="Don't run pipeline immediately on start"
     )
+    parser.add_argument(
+        "--nightly",
+        action="store_true",
+        help="Ночной режим: запуск nightly_pipeline.py по cron (по умолчанию 2:00)"
+    )
+    parser.add_argument(
+        "--nightly-hour",
+        type=int,
+        default=int(os.getenv("NIGHTLY_HOUR", "2")),
+        help="Час старта в ночном режиме (default: 2)"
+    )
+    parser.add_argument(
+        "--nightly-minute",
+        type=int,
+        default=int(os.getenv("NIGHTLY_MINUTE", "0")),
+        help="Минута старта в ночном режиме (default: 0)"
+    )
+    parser.add_argument(
+        "--walk-forward",
+        action="store_true",
+        help="В ночном режиме использовать walk-forward валидацию"
+    )
 
     args = parser.parse_args()
 
     # Create pipeline runner
     runner = PipelineRunner(days=args.days, interval=args.candle_interval)
 
-    # Single run mode
+    # ====== Nightly mode ======
+    if args.nightly:
+        logger.info("=" * 60)
+        logger.info("Nightly Scheduler Started")
+        logger.info(f"  Cron: каждый день в {args.nightly_hour:02d}:{args.nightly_minute:02d}")
+        logger.info(f"  Тикеры: SBER, OZON, VTBR")
+        logger.info(f"  Шаги: обучение всех моделей → LLM-валидация")
+        logger.info("=" * 60)
+
+        scheduler = BlockingScheduler()
+        scheduler.add_job(
+            lambda: runner.run_nightly(walk_forward=args.walk_forward),
+            trigger=CronTrigger(hour=args.nightly_hour, minute=args.nightly_minute),
+            id='nightly',
+            name='Nightly Top-3 Training + LLM',
+            max_instances=1,
+            coalesce=True,
+        )
+
+        if not args.no_initial:
+            logger.info("Запускаю ночной пайплайн прямо сейчас (--no-initial для отключения)...")
+            runner.run_nightly(walk_forward=args.walk_forward)
+
+        try:
+            scheduler.start()
+        except KeyboardInterrupt:
+            logger.info("\nScheduler stopped by user")
+            scheduler.shutdown()
+        return
+
+    # ====== Single run mode ======
     if args.once:
         logger.info("Running pipeline once...")
         runner.run_pipeline()
         return
 
-    # Scheduler mode
+    # ====== Interval mode (default) ======
     logger.info("=" * 60)
     logger.info("Pipeline Scheduler Started")
     logger.info(f"  Interval: every {args.interval} minutes")
@@ -204,8 +264,6 @@ def main():
     logger.info("Press Ctrl+C to stop")
 
     scheduler = BlockingScheduler()
-
-    # Schedule recurring job
     scheduler.add_job(
         runner.run_pipeline,
         trigger=IntervalTrigger(minutes=args.interval),
@@ -215,7 +273,6 @@ def main():
         coalesce=True
     )
 
-    # Run immediately on start (unless --no-initial)
     if not args.no_initial:
         logger.info("Running initial pipeline...")
         runner.run_pipeline()

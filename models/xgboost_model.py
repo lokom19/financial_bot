@@ -34,12 +34,18 @@ class XGBoostTradeModelNew(BaseTradeModel):
         super().__init__(test_size=test_size, random_state=random_state)
         self.params = params or {
             'objective': 'reg:squarederror',
-            'learning_rate': 0.05,
-            'max_depth': 6,
-            'n_estimators': 200,
+            # Меньше LR + больше деревьев + ранняя остановка → стабильнее
+            'learning_rate': 0.03,
+            'max_depth': 5,             # глубже = больше overfit
+            'n_estimators': 500,
+            'min_child_weight': 5,      # минимум наблюдений в листе (защита от шума)
             'subsample': 0.8,
             'colsample_bytree': 0.8,
-            'random_state': random_state
+            'reg_alpha': 0.1,           # L1 регуляризация
+            'reg_lambda': 1.0,          # L2 регуляризация
+            'early_stopping_rounds': 30,
+            'random_state': random_state,
+            'verbosity': 0,
         }
         self.model = None
 
@@ -48,10 +54,12 @@ class XGBoostTradeModelNew(BaseTradeModel):
 
     def _fit_model(self, X_train, y_train, X_val, y_val):
         self.model = self._create_model()
+        # eval_set + early_stopping_rounds (в params) → автоматический выбор
+        # оптимального числа деревьев по валидации
         self.model.fit(
             X_train, y_train,
             eval_set=[(X_val, y_val)],
-            verbose=False
+            verbose=False,
         )
         # Extract feature importances
         if self.feature_columns:

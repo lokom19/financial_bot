@@ -3,17 +3,152 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>{{ model_name }} - Модели прогнозирования</title>
-    <link rel="stylesheet" href="/static/styles.css">
+    <title>{{ model_name }} — Trading Signals</title>
+    <link rel="stylesheet" href="/static/styles.css?v=4">
+    <style>
+        .top-bar {
+            background: #1a1a2e; color: #fff; padding: 0 24px;
+            display: flex; align-items: center; justify-content: space-between;
+            height: 56px; position: sticky; top: 0; z-index: 100;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.18);
+        }
+        .top-bar-brand { font-size: 18px; font-weight: 700; display: flex; align-items: center; gap: 8px; }
+        .top-bar-brand a { color: #fff; text-decoration: none; }
+        .top-bar-user { display: flex; align-items: center; gap: 16px; font-size: 14px; }
+        .top-bar-user a { color: #c8d3ff; text-decoration: none; padding: 6px 14px; border-radius: 6px; transition: background 0.2s; }
+        .top-bar-user a:hover { background: rgba(255,255,255,0.12); }
+        .top-bar-user .btn-login { background: #4361ee; color: #fff; font-weight: 600; }
+        .user-avatar-small {
+            width: 32px; height: 32px; border-radius: 50%;
+            background: linear-gradient(135deg, #4361ee, #7b2fbe);
+            display: flex; align-items: center; justify-content: center;
+            font-size: 13px; font-weight: 700; color: #fff;
+        }
+        .user-chip { display: flex; align-items: center; gap: 8px; }
+
+        /* Card metrics layout */
+        .metrics-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+            gap: 10px;
+            margin: 12px 0;
+        }
+        .metric-box {
+            background: #f8f9fa;
+            border-radius: 8px;
+            padding: 10px 12px;
+            text-align: center;
+        }
+        .metric-box .mval {
+            font-size: 18px;
+            font-weight: 700;
+            color: #1a1a2e;
+        }
+        .metric-box .mlabel {
+            font-size: 11px;
+            color: #888;
+            margin-top: 2px;
+        }
+        .metric-box.good .mval { color: #28a745; }
+        .metric-box.bad .mval { color: #dc3545; }
+        .metric-box.mid .mval { color: #f0ad4e; }
+
+        /* LLM analysis block */
+        .llm-block {
+            margin-top: 14px;
+            padding: 12px 16px;
+            border-radius: 8px;
+            border: 1.5px solid #e0e7ff;
+            background: #f5f7ff;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            flex-wrap: wrap;
+        }
+        .llm-reasoning {
+            width: 100%;
+            margin-top: 6px;
+            padding: 8px 12px;
+            background: #fff;
+            border-left: 3px solid #4361ee;
+            border-radius: 4px;
+            font-size: 13px;
+            color: #333;
+            line-height: 1.5;
+            white-space: pre-wrap;
+            word-break: break-word;
+        }
+        .llm-reasoning .src {
+            display: block;
+            font-size: 11px;
+            color: #888;
+            margin-top: 6px;
+            font-style: italic;
+        }
+        .llm-label { font-size: 13px; color: #555; font-weight: 600; }
+        .btn-llm {
+            padding: 6px 16px;
+            background: #4361ee;
+            color: #fff;
+            border: none;
+            border-radius: 6px;
+            font-size: 13px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: background 0.2s;
+        }
+        .btn-llm:hover { background: #3650d8; }
+        .llm-result {
+            display: none;
+            font-size: 13px;
+            padding: 4px 10px;
+            border-radius: 6px;
+            font-weight: 700;
+        }
+        .llm-agree { background: #d4edda; color: #155724; }
+        .llm-disagree { background: #fde8e8; color: #7b0000; }
+        .llm-unavail { background: #fff3cd; color: #856404; }
+        .llm-loading { color: #888; font-size: 13px; display: none; }
+
+        /* Backtest summary */
+        .backtest-row {
+            display: flex; gap: 16px; flex-wrap: wrap;
+            font-size: 13px; color: #555; margin-top: 8px;
+        }
+        .backtest-item { display: flex; gap: 4px; align-items: center; }
+        .backtest-item b { color: #1a1a2e; }
+    </style>
 </head>
 <body>
+    <!-- Top bar -->
+    <div class="top-bar">
+        <div class="top-bar-brand">
+            <a href="/">📈 Trading Signals</a>
+            <span style="color: #888; margin: 0 6px;">/</span>
+            <span style="color: #c8d3ff;">{{ model_name }}</span>
+        </div>
+        <div class="top-bar-user">
+            <a href="{{ streamlit_url }}" target="_blank" rel="noopener" title="Открыть Streamlit-дашборд">📊 Дашборд</a>
+            {% if current_user %}
+            <div class="user-chip">
+                <div class="user-avatar-small">{{ current_user.username[0].upper() }}</div>
+                <a href="/auth/profile">{{ current_user.username }}</a>
+            </div>
+            <a href="/auth/logout">Выйти</a>
+            {% else %}
+            <a href="/auth/register">Регистрация</a>
+            <a href="/auth/login" class="btn-login">Войти</a>
+            {% endif %}
+        </div>
+    </div>
+
     <div class="header">
         <div class="header-title">
             <h1>
                 <a href="/" class="back-link">← </a>
                 Модель: {{ model_name }}
             </h1>
-            <span id="time-info">Последнее обновление: ...</span>
+            <span id="time-info" style="font-size:13px; color:#888;"></span>
         </div>
 
         <div class="sorting-controls">
@@ -21,25 +156,17 @@
                 <span>По точности</span>
                 <span class="sort-arrow {% if current_sort == 'accuracy' %}{{ current_order }}{% endif %}"></span>
             </div>
-            <div class="sorting-option {% if current_sort == 'signal' %}active{% endif %}" data-sort="signal">
-                <span>По сигналу</span>
-                <span class="sort-arrow {% if current_sort == 'signal' %}{{ current_order }}{% endif %}"></span>
-            </div>
-            <div class="sorting-option {% if current_sort == 'ticker' %}active{% endif %}" data-sort="ticker">
-                <span>По тикеру</span>
-                <span class="sort-arrow {% if current_sort == 'ticker' %}{{ current_order }}{% endif %}"></span>
-            </div>
-            <div class="sorting-option {% if current_sort == 'date' %}active{% endif %}" data-sort="date">
-                <span>По дате</span>
-                <span class="sort-arrow {% if current_sort == 'date' %}{{ current_order }}{% endif %}"></span>
+            <div class="sorting-option {% if current_sort == 'r_squared' %}active{% endif %}" data-sort="r_squared">
+                <span>По R²</span>
+                <span class="sort-arrow {% if current_sort == 'r_squared' %}{{ current_order }}{% endif %}"></span>
             </div>
             <div class="sorting-option {% if current_sort == 'expected_change' %}active{% endif %}" data-sort="expected_change">
                 <span>По изменению</span>
                 <span class="sort-arrow {% if current_sort == 'expected_change' %}{{ current_order }}{% endif %}"></span>
             </div>
-            <div class="sorting-option {% if current_sort == 'r_squared' %}active{% endif %}" data-sort="r_squared">
-                <span>По R²</span>
-                <span class="sort-arrow {% if current_sort == 'r_squared' %}{{ current_order }}{% endif %}"></span>
+            <div class="sorting-option {% if current_sort == 'win_rate' %}active{% endif %}" data-sort="win_rate">
+                <span>По Win Rate</span>
+                <span class="sort-arrow {% if current_sort == 'win_rate' %}{{ current_order }}{% endif %}"></span>
             </div>
         </div>
 
@@ -72,10 +199,14 @@
                     data-algorithm="{{ file.algorithm }}"
                     data-date="{{ file.date }}"
                     data-expected-change="{{ file.expected_change }}"
-                    data-r-squared="{{ file.r_squared }}">
+                    data-r-squared="{{ file.r_squared }}"
+                    data-win-rate="{{ file.win_rate }}">
 
                     <div class="card-header {% if file.signal %}card-header-{{ file.signal|lower }}{% endif %}">
-                        <span>{{ file.ticker }}</span>
+                        <a href="/ticker/{{ file.ticker }}" style="color: inherit; text-decoration: none; flex: 1;" title="Открыть полный AI-отчёт по {{ file.ticker }}">
+                            <span>{{ file.ticker }}</span>
+                            <span style="font-size: 11px; opacity: 0.7; margin-left: 6px;">↗ отчёт</span>
+                        </a>
                         {% if file.signal %}
                             <span>{{ file.signal }}</span>
                         {% endif %}
@@ -84,33 +215,164 @@
                     <div class="card-meta">
                         <span>{{ file.algorithm }}</span>
                         <span>{{ file.date }}</span>
-                        {% if file.accuracy %}
-                            <span class="accuracy">Точность: {{ "%.2f"|format(file.accuracy) }}%</span>
+                    </div>
+
+                    <!-- Structured metrics grid -->
+                    <div class="metrics-grid">
+                        <div class="metric-box {% if file.r_squared and file.r_squared >= 0.7 %}good{% elif file.r_squared and file.r_squared >= 0.5 %}mid{% elif file.r_squared %}bad{% endif %}">
+                            <div class="mval">{{ "%.3f"|format(file.r_squared) if file.r_squared is not none else "—" }}</div>
+                            <div class="mlabel">R²</div>
+                        </div>
+                        <div class="metric-box {% if file.accuracy and file.accuracy >= 60 %}good{% elif file.accuracy and file.accuracy >= 55 %}mid{% elif file.accuracy %}bad{% endif %}">
+                            <div class="mval">{{ "%.1f"|format(file.accuracy) + "%" if file.accuracy is not none else "—" }}</div>
+                            <div class="mlabel">Direction</div>
+                        </div>
+                        <div class="metric-box {% if file.expected_change and file.expected_change > 0 %}good{% elif file.expected_change and file.expected_change < 0 %}bad{% endif %}">
+                            <div class="mval">{{ "%+.2f"|format(file.expected_change) + "%" if file.expected_change is not none else "—" }}</div>
+                            <div class="mlabel">Изм. цены</div>
+                        </div>
+                        {% if file.win_rate is not none %}
+                        <div class="metric-box {% if file.win_rate and file.win_rate >= 60 %}good{% elif file.win_rate and file.win_rate >= 50 %}mid{% elif file.win_rate %}bad{% endif %}">
+                            <div class="mval">{{ "%.1f"|format(file.win_rate) + "%" if file.win_rate is not none else "—" }}</div>
+                            <div class="mlabel">Win Rate</div>
+                        </div>
                         {% endif %}
-                        {% if file.expected_change is not none %}
-                            <span class="expected-change {% if file.expected_change > 0 %}positive{% else %}negative{% endif %}">
-                                {{ "%.2f"|format(file.expected_change) }}%
-                            </span>
+                        {% if file.profit_factor is not none %}
+                        <div class="metric-box {% if file.profit_factor and file.profit_factor >= 1.5 %}good{% elif file.profit_factor and file.profit_factor >= 1.0 %}mid{% elif file.profit_factor %}bad{% endif %}">
+                            <div class="mval">{{ "%.2f"|format(file.profit_factor) if file.profit_factor is not none else "—" }}</div>
+                            <div class="mlabel">Profit Factor</div>
+                        </div>
+                        {% endif %}
+                        {% if file.sharpe_ratio is not none %}
+                        <div class="metric-box {% if file.sharpe_ratio and file.sharpe_ratio >= 1.0 %}good{% elif file.sharpe_ratio and file.sharpe_ratio >= 0 %}mid{% elif file.sharpe_ratio %}bad{% endif %}">
+                            <div class="mval">{{ "%.2f"|format(file.sharpe_ratio) if file.sharpe_ratio is not none else "—" }}</div>
+                            <div class="mlabel">Sharpe</div>
+                        </div>
                         {% endif %}
                     </div>
 
-                    <div class="card-body">{{ file.content }}</div>
+                    <!-- Backtest summary line -->
+                    {% if file.total_trades %}
+                    <div class="backtest-row">
+                        <div class="backtest-item">Сделок: <b>{{ file.total_trades }}</b></div>
+                        {% if file.cumulative_return is not none %}
+                        <div class="backtest-item">Доходность: <b style="color: {% if file.cumulative_return > 0 %}#28a745{% else %}#dc3545{% endif %}">{{ "%+.2f"|format(file.cumulative_return) }}%</b></div>
+                        {% endif %}
+                        {% if file.max_drawdown is not none %}
+                        <div class="backtest-item">Max Drawdown: <b>{{ "%.2f"|format(file.max_drawdown) }}%</b></div>
+                        {% endif %}
+                    </div>
+                    {% endif %}
+
+                    <!-- LLM Analysis -->
+                    <div class="llm-block" id="llm-block-{{ loop.index }}">
+                        <span class="llm-label">🤖 LLM-анализ</span>
+
+                        {% if file.llm_signal %}
+                            {% if file.llm_signal == 'AGREE' %}
+                            <span class="llm-result llm-agree" style="display:inline-block">✓ AGREE</span>
+                            {% elif file.llm_signal == 'DISAGREE' %}
+                            <span class="llm-result llm-disagree" style="display:inline-block">✗ DISAGREE</span>
+                            {% else %}
+                            <span class="llm-result llm-unavail" style="display:inline-block">⚠ {{ file.llm_signal }}</span>
+                            {% endif %}
+                            {% if file.llm_processed_at %}
+                            <span style="font-size:11px; color:#888;">обработано: {{ file.llm_processed_at }} (ночной пайплайн)</span>
+                            {% endif %}
+
+                            {% if file.llm_reasoning %}
+                            <div class="llm-reasoning">
+                                {{ file.llm_reasoning }}
+                                <span class="src">— заключение LLM</span>
+                            </div>
+                            {% endif %}
+                        {% else %}
+                            <button class="btn-llm" onclick="analyzeLLM({{ loop.index }}, '{{ file.ticker }}', {{ file.current_price or 0 }}, '{{ file.signal }}', {{ file.r_squared or 0 }}, {{ file.accuracy or 50 }})">
+                                Спросить LLM
+                            </button>
+                            <span class="llm-loading" id="llm-loading-{{ loop.index }}">Анализирую...</span>
+                            <span class="llm-result" id="llm-result-{{ loop.index }}"></span>
+                            <div class="llm-reasoning" id="llm-reasoning-{{ loop.index }}" style="display:none;"></div>
+                        {% endif %}
+                    </div>
                 </div>
             {% endfor %}
         {% else %}
             <div class="empty-message">
                 {% if current_signal %}
-                    Нет доступных результатов для сигнала {{ current_signal }}.
-                    <a href="/model/{{ model_name }}">Показать все результаты</a>
+                    Нет результатов для сигнала {{ current_signal }}.
+                    <a href="/model/{{ model_name }}">Показать все</a>
                 {% else %}
-                    Нет доступных результатов. Добавьте файлы в директорию модели.
+                    Нет данных. Запустите обучение: <code>make train</code>
                 {% endif %}
             </div>
         {% endif %}
     </div>
 
-    <a href="/model/{{ model_name }}" class="refresh-button" title="Обновить страницу">↻</a>
+    <a href="/model/{{ model_name }}" class="refresh-button" title="Обновить">↻</a>
 
-    <script src="/static/app.js"></script></body>
+    <script src="/static/app.js"></script>
+    <script>
+        document.getElementById('time-info').textContent =
+            'Обновлено: ' + new Date().toLocaleString('ru-RU');
+
+        async function analyzeLLM(idx, ticker, price, signal, r2, direction) {
+            const btn = document.querySelector(`#llm-block-${idx} .btn-llm`);
+            const loading = document.getElementById(`llm-loading-${idx}`);
+            const result = document.getElementById(`llm-result-${idx}`);
+            const reason = document.getElementById(`llm-reasoning-${idx}`);
+
+            btn.disabled = true;
+            loading.style.display = 'inline';
+            result.style.display = 'none';
+            if (reason) reason.style.display = 'none';
+
+            try {
+                const resp = await fetch('/api/llm/analyze', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({
+                        ticker: ticker,
+                        current_price: price,
+                        trading_signal: signal,
+                        r2_avg: r2,
+                        direction_accuracy_avg: direction,
+                        models_data: []
+                    })
+                });
+                const data = await resp.json();
+                loading.style.display = 'none';
+                result.style.display = 'inline';
+
+                if (data.answer === 'AGREE') {
+                    result.className = 'llm-result llm-agree';
+                    result.textContent = '✓ AGREE';
+                } else if (data.answer === 'DISAGREE') {
+                    result.className = 'llm-result llm-disagree';
+                    result.textContent = '✗ DISAGREE';
+                } else {
+                    result.className = 'llm-result llm-unavail';
+                    result.textContent = '⚠ ' + (data.explanation || 'недоступен');
+                }
+
+                const reasoningText = data.reasoning || data.explanation || '';
+                if (reason && reasoningText) {
+                    reason.style.display = 'block';
+                    reason.innerHTML = '';
+                    reason.appendChild(document.createTextNode(reasoningText));
+                    const src = document.createElement('span');
+                    src.className = 'src';
+                    src.textContent = '— заключение LLM (только что)';
+                    reason.appendChild(src);
+                }
+            } catch (e) {
+                loading.style.display = 'none';
+                result.style.display = 'inline';
+                result.className = 'llm-result llm-unavail';
+                result.textContent = '⚠ Ошибка запроса';
+            }
+            btn.disabled = false;
+        }
+    </script>
 </body>
 </html>

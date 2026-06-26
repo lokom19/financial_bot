@@ -159,23 +159,45 @@ async def get_df(figi, ticker_info, days: int = DEFAULT_DAYS, interval: CandleIn
                 if not df.empty:
                     df.timestamp = df.timestamp.dt.tz_localize(None)  # Убираем часовой пояс
 
-                    # Сохраняем данные в PostgreSQL схему all_dfs
+                    # Сохраняем данные в PostgreSQL схему all_dfs (UPSERT-логика)
                     try:
+                        from sqlalchemy import text as _sa_text
                         engine = create_engine(PG_CONNECTION_STRING)
 
                         # Имя таблицы будет равно FIGI
                         table_name = figi
 
-                        # Сохраняем в схему all_dfs
+                        # Безопасный апсерт:
+                        # 1) Если таблица существует — удаляем только перекрывающийся
+                        #    диапазон (последние N дней, которые сейчас грузим). Старая
+                        #    история (за пределами этого окна) НЕ ТРОГАЕТСЯ.
+                        # 2) Если таблицы нет — append её создаст по структуре df.
+                        min_ts = df['timestamp'].min()
+                        try:
+                            with engine.begin() as conn:
+                                conn.execute(
+                                    _sa_text(
+                                        f'DELETE FROM all_dfs."{table_name}" '
+                                        f'WHERE timestamp >= :since'
+                                    ),
+                                    {"since": min_ts},
+                                )
+                        except Exception:
+                            # таблицы ещё нет — пропускаем удаление
+                            pass
+
                         df.to_sql(
                             name=table_name,
                             con=engine,
                             schema='all_dfs',
-                            if_exists='replace',  # Заменяем существующую таблицу
-                            index=False
+                            if_exists='append',  # Дописываем, не пересоздавая
+                            index=False,
                         )
 
-                        logger.info(f"Данные для {figi} ({ticker_name}) успешно сохранены в PostgreSQL схему all_dfs")
+                        logger.info(
+                            f"Данные для {figi} ({ticker_name}) сохранены в PostgreSQL "
+                            f"(UPSERT, добавлено {len(df)} свечей)"
+                        )
                     except Exception as db_error:
                         logger.error(f"Ошибка сохранения в PostgreSQL для {figi} ({ticker_name}): {str(db_error)}")
 
