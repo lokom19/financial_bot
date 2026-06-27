@@ -72,6 +72,28 @@ def get_current_user_from_request(request: Request) -> Optional[User]:
     finally:
         db.close()
 
+
+def _require_login(request: Request):
+    """
+    Возвращает (user, None) если пользователь залогинен,
+    или (None, redirect_response) если нет.
+
+    Использование:
+        user, redirect = _require_login(request)
+        if redirect:
+            return redirect
+    """
+    user = get_current_user_from_request(request)
+    if user:
+        return user, None
+    # Для API эндпоинтов отдаём 401, для страниц — редирект на логин
+    if request.url.path.startswith("/api/"):
+        return None, JSONResponse(
+            status_code=401,
+            content={"error": "Требуется авторизация"},
+        )
+    return None, RedirectResponse(url="/auth/login", status_code=302)
+
 ASYNC_DATABASE_URL = f"postgresql+asyncpg://{DB_USER}:{DB_PASSWORD}@{DB_HOST}:{DB_PORT}/{DB_NAME}"
 
 # Создаем асинхронный движок
@@ -285,8 +307,10 @@ def _load_ticker_overview(db: Session, ticker_or_figi: str) -> dict:
 
 @app.get("/ticker/{ticker}", response_class=HTMLResponse, tags=["Pages"])
 async def ticker_page(request: Request, ticker: str):
-    """Страница с полной сводкой по тикеру + кнопка LLM-отчёта."""
-    current_user = get_current_user_from_request(request)
+    """Страница с полной сводкой по тикеру + кнопка LLM-отчёта. Требует авторизации."""
+    current_user, redirect = _require_login(request)
+    if redirect:
+        return redirect
     db = SyncSessionLocal()
     try:
         overview = _load_ticker_overview(db, ticker)
@@ -662,8 +686,17 @@ async def readiness_check():
 
 @app.get("/", response_class=HTMLResponse, tags=["Pages"], description="Стартовая страница")
 async def read_root(request: Request):
-    """Главная страница со списком доступных моделей"""
+    """
+    Главная: для НЕ залогиненных — лендинг с описанием сервиса.
+    Для залогиненных — список моделей и виджет AI-отчётов.
+    """
     current_user = get_current_user_from_request(request)
+    if not current_user:
+        return templates.TemplateResponse(
+            request=request,
+            name="landing.html",
+            context={},
+        )
 
     try:
         db = SyncSessionLocal()
@@ -788,9 +821,11 @@ async def view_model(request: Request,
                      signal: Optional[str] = None,
                      sort: str = "accuracy",
                      order: str = "desc"):
-    """Страница с результатами конкретной модели"""
+    """Страница с результатами конкретной модели — требует авторизации"""
     logger.info(f"Запрошена модель: {model_name}")
-    current_user = get_current_user_from_request(request)
+    current_user, redirect = _require_login(request)
+    if redirect:
+        return redirect
 
     try:
         db = SyncSessionLocal()

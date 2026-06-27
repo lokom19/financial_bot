@@ -1,0 +1,366 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Trading Signals — AI-аналитика биржевых сигналов</title>
+    <link rel="stylesheet" href="/static/styles.css?v=4">
+    <style>
+        .lp-hero {
+            background: linear-gradient(135deg, #4f46e5 0%, #7c3aed 100%);
+            color: #fff;
+            padding: 80px 24px 100px;
+            text-align: center;
+        }
+        .lp-hero h1 {
+            margin: 0 0 18px;
+            font-size: 48px;
+            font-weight: 800;
+            letter-spacing: -0.03em;
+            line-height: 1.05;
+        }
+        .lp-hero p {
+            font-size: 18px;
+            opacity: 0.92;
+            max-width: 720px;
+            margin: 0 auto 36px;
+            line-height: 1.55;
+        }
+        .lp-cta {
+            display: inline-flex;
+            gap: 14px;
+            justify-content: center;
+            flex-wrap: wrap;
+        }
+        .lp-cta a {
+            padding: 14px 32px;
+            border-radius: 12px;
+            text-decoration: none;
+            font-weight: 700;
+            font-size: 15px;
+            transition: all 0.15s;
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .lp-cta .primary {
+            background: #fff;
+            color: var(--primary);
+            box-shadow: 0 6px 20px rgba(0,0,0,0.15);
+        }
+        .lp-cta .primary:hover { transform: translateY(-2px); box-shadow: 0 12px 28px rgba(0,0,0,0.20); }
+        .lp-cta .ghost {
+            background: rgba(255,255,255,0.14);
+            color: #fff;
+            backdrop-filter: blur(4px);
+        }
+        .lp-cta .ghost:hover { background: rgba(255,255,255,0.24); }
+
+        .lp-section {
+            max-width: 1100px;
+            margin: 0 auto;
+            padding: 80px 24px;
+        }
+        .lp-section-title {
+            font-size: 32px;
+            font-weight: 700;
+            color: var(--text);
+            text-align: center;
+            margin: 0 0 12px;
+            letter-spacing: -0.02em;
+        }
+        .lp-section-subtitle {
+            font-size: 16px;
+            color: var(--text-muted);
+            text-align: center;
+            margin: 0 auto 48px;
+            max-width: 600px;
+            line-height: 1.55;
+        }
+
+        .lp-features {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+            gap: 24px;
+        }
+        .lp-feat {
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: 16px;
+            padding: 28px 24px;
+            transition: all 0.2s;
+        }
+        .lp-feat:hover {
+            transform: translateY(-4px);
+            box-shadow: var(--hover-shadow);
+            border-color: var(--primary);
+        }
+        .lp-feat .icon {
+            font-size: 32px;
+            margin-bottom: 14px;
+        }
+        .lp-feat h3 {
+            margin: 0 0 10px;
+            font-size: 18px;
+            font-weight: 700;
+            color: var(--text);
+        }
+        .lp-feat p {
+            margin: 0;
+            font-size: 14px;
+            line-height: 1.55;
+            color: var(--text-muted);
+        }
+
+        .lp-how {
+            background: var(--surface-alt);
+        }
+        .lp-steps {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+            gap: 24px;
+        }
+        .lp-step {
+            position: relative;
+            padding-top: 50px;
+        }
+        .lp-step .num {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 38px; height: 38px;
+            border-radius: 50%;
+            background: linear-gradient(135deg, var(--primary), var(--accent));
+            color: #fff;
+            display: flex; align-items: center; justify-content: center;
+            font-weight: 800;
+            font-size: 16px;
+            box-shadow: 0 4px 12px rgba(79, 70, 229, 0.30);
+        }
+        .lp-step h4 {
+            margin: 0 0 8px;
+            font-size: 17px;
+            font-weight: 700;
+            color: var(--text);
+        }
+        .lp-step p {
+            margin: 0;
+            font-size: 14px;
+            line-height: 1.55;
+            color: var(--text-muted);
+        }
+
+        .lp-stack {
+            text-align: center;
+        }
+        .lp-stack-list {
+            display: flex;
+            gap: 12px;
+            justify-content: center;
+            flex-wrap: wrap;
+            margin-top: 28px;
+        }
+        .lp-stack-list span {
+            padding: 8px 16px;
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: 999px;
+            font-size: 13px;
+            color: var(--text);
+            font-weight: 600;
+        }
+
+        .lp-footer-cta {
+            background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%);
+            color: #fff;
+            text-align: center;
+            padding: 60px 24px;
+            margin-top: 0;
+        }
+        .lp-footer-cta h2 {
+            margin: 0 0 16px;
+            font-size: 28px;
+            font-weight: 700;
+            letter-spacing: -0.02em;
+        }
+        .lp-footer-cta p {
+            font-size: 15px;
+            opacity: 0.85;
+            margin: 0 auto 28px;
+            max-width: 520px;
+            line-height: 1.55;
+        }
+
+        .lp-foot {
+            padding: 24px;
+            text-align: center;
+            color: var(--text-soft);
+            font-size: 13px;
+            background: var(--surface);
+            border-top: 1px solid var(--border);
+        }
+
+        @media (max-width: 600px) {
+            .lp-hero h1 { font-size: 36px; }
+            .lp-hero p { font-size: 16px; }
+            .lp-section-title { font-size: 26px; }
+        }
+    </style>
+</head>
+<body style="background: var(--bg);">
+
+    <!-- Минимальная шапка -->
+    <div class="tb-top">
+        <div class="tb-brand">
+            <span>📈</span> Trading Signals
+        </div>
+        <div class="tb-user">
+            <a href="/auth/login">Войти</a>
+            <a href="/auth/register" class="tb-btn">Регистрация</a>
+        </div>
+    </div>
+
+    <!-- Hero -->
+    <section class="lp-hero">
+        <h1>AI-аналитика биржевых сигналов</h1>
+        <p>
+            Ежедневно ансамбль ML-моделей анализирует акции SBER, OZON, VTBR.
+            LLM объединяет прогнозы и технический анализ в один вердикт
+            с целевой ценой и стоп-лоссом.
+        </p>
+        <div class="lp-cta">
+            <a href="/auth/register" class="primary">Начать бесплатно →</a>
+            <a href="/auth/login" class="ghost">У меня уже есть аккаунт</a>
+        </div>
+    </section>
+
+    <!-- Что внутри -->
+    <section class="lp-section">
+        <h2 class="lp-section-title">Что внутри</h2>
+        <p class="lp-section-subtitle">
+            Не один индикатор и не одна модель — а консенсус из 10+ алгоритмов,
+            прошедший проверку техническим анализом и LLM.
+        </p>
+
+        <div class="lp-features">
+            <div class="lp-feat">
+                <div class="icon">🤖</div>
+                <h3>10+ ML-моделей</h3>
+                <p>
+                    Ridge, XGBoost, LightGBM, CatBoost, Random Forest, ARIMA,
+                    ARMA-GARCH и другие — каждая со своими сильными сторонами.
+                </p>
+            </div>
+            <div class="lp-feat">
+                <div class="icon">📊</div>
+                <h3>Технический анализ</h3>
+                <p>
+                    RSI, MACD, Stochastic, Bollinger, Williams %R, CCI — на 70+ признаках
+                    рассчитанных по последним рыночным данным.
+                </p>
+            </div>
+            <div class="lp-feat">
+                <div class="icon">🎯</div>
+                <h3>AI-вердикт</h3>
+                <p>
+                    LLM получает прогнозы всех моделей + TA и выдаёт один вердикт
+                    BUY / SELL / HOLD с уровнями входа, цели и стоп-лосса.
+                </p>
+            </div>
+            <div class="lp-feat">
+                <div class="icon">📈</div>
+                <h3>Точность отслеживается</h3>
+                <p>
+                    Каждый AI-вердикт сверяется с реальной ценой на следующий день.
+                    Видно % корректных направлений и достигнутых целей.
+                </p>
+            </div>
+            <div class="lp-feat">
+                <div class="icon">🌙</div>
+                <h3>Ночные обновления</h3>
+                <p>
+                    Каждый день в 2:00 МСК пайплайн подтягивает свежие свечи,
+                    переобучает модели и формирует новый AI-отчёт.
+                </p>
+            </div>
+            <div class="lp-feat">
+                <div class="icon">📋</div>
+                <h3>История и детали</h3>
+                <p>
+                    История всех вердиктов с разбивкой по дням, объяснения от LLM
+                    что значат показатели, детальные прогнозы по каждой модели.
+                </p>
+            </div>
+        </div>
+    </section>
+
+    <!-- Как это работает -->
+    <section class="lp-section lp-how">
+        <div style="max-width: 1100px; margin: 0 auto;">
+            <h2 class="lp-section-title">Как это работает</h2>
+            <p class="lp-section-subtitle">
+                Простой 4-шаговый пайплайн ежедневно с нуля до готового вердикта.
+            </p>
+
+            <div class="lp-steps">
+                <div class="lp-step">
+                    <div class="num">1</div>
+                    <h4>Сбор данных</h4>
+                    <p>Подтягиваем свежие свечи Мосбиржи через Tinkoff API. История за 4+ года.</p>
+                </div>
+                <div class="lp-step">
+                    <div class="num">2</div>
+                    <h4>Обучение</h4>
+                    <p>10+ моделей обучаются на актуальных данных. Каждая даёт свой прогноз.</p>
+                </div>
+                <div class="lp-step">
+                    <div class="num">3</div>
+                    <h4>AI-агрегация</h4>
+                    <p>LLM собирает все прогнозы + TA и формулирует единый вердикт с ценовыми уровнями.</p>
+                </div>
+                <div class="lp-step">
+                    <div class="num">4</div>
+                    <h4>Проверка факта</h4>
+                    <p>На следующий день вердикт сверяется с реальной ценой — точность накапливается.</p>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Технологии -->
+    <section class="lp-section lp-stack">
+        <h2 class="lp-section-title">Технологии</h2>
+        <p class="lp-section-subtitle">
+            Open-source стек, никакой магии. Всё прозрачно.
+        </p>
+        <div class="lp-stack-list">
+            <span>Python 3.10</span>
+            <span>FastAPI</span>
+            <span>PostgreSQL</span>
+            <span>scikit-learn</span>
+            <span>XGBoost</span>
+            <span>LightGBM</span>
+            <span>CatBoost</span>
+            <span>statsmodels</span>
+            <span>Groq LLM (llama-3.3-70b)</span>
+            <span>Tinkoff API</span>
+            <span>Streamlit</span>
+            <span>Docker</span>
+        </div>
+    </section>
+
+    <!-- CTA -->
+    <section class="lp-footer-cta">
+        <h2>Готов посмотреть прогнозы?</h2>
+        <p>Зарегистрируйся бесплатно — данные обновляются каждую ночь, тебе не нужно ничего настраивать.</p>
+        <div class="lp-cta">
+            <a href="/auth/register" class="primary">Создать аккаунт</a>
+        </div>
+    </section>
+
+    <footer class="lp-foot">
+        ⚠ Сервис носит информационный характер и не является индивидуальной инвестиционной рекомендацией.
+    </footer>
+
+</body>
+</html>

@@ -59,6 +59,11 @@ services:
       - LLM_TIMEOUT=${LLM_TIMEOUT:-30}
       - STREAMLIT_URL=${STREAMLIT_URL:-https://${DOMAIN:-localhost}/dashboard/}
       - TZ=${TZ:-Europe/Moscow}
+      # SOCKS5 proxy для исходящих запросов к LLM (обход geo-блокировок)
+      - HTTPS_PROXY=${OUTBOUND_PROXY:-}
+      - HTTP_PROXY=${OUTBOUND_PROXY:-}
+      - ALL_PROXY=${OUTBOUND_PROXY:-}
+      - NO_PROXY=postgres,dashboard,localhost,127.0.0.1
     volumes:
       - ./templates:/app/templates
       - ./static:/app/static
@@ -100,6 +105,11 @@ services:
       - NIGHTLY_EXCLUDE_MODELS=${NIGHTLY_EXCLUDE_MODELS:-lstm,tcn,rdpg_lstm}
       - TZ=${TZ:-Europe/Moscow}
       - LOG_TO_FILE=false
+      # SOCKS5 proxy для исходящих запросов к LLM (обход geo-блокировок)
+      - HTTPS_PROXY=${OUTBOUND_PROXY:-}
+      - HTTP_PROXY=${OUTBOUND_PROXY:-}
+      - ALL_PROXY=${OUTBOUND_PROXY:-}
+      - NO_PROXY=postgres,dashboard,localhost,127.0.0.1
     depends_on:
       postgres:
         condition: service_healthy
