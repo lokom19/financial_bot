@@ -702,18 +702,38 @@ def main(db_path):
 
         if metrics:
             print(f"\nМетрики модели:")
-            if metrics.get('mse') is not None:
-                print(f"MSE: {metrics['mse']:.6f}")
-            if metrics.get('rmse') is not None:
-                print(f"RMSE: {metrics['rmse']:.6f}")
-            if metrics.get('mae') is not None:
-                print(f"MAE: {metrics['mae']:.6f}")
-            if metrics.get('r2') is not None:
-                print(f"R²: {metrics['r2']:.6f}")
-            if metrics.get('mape') is not None:
-                print(f"MAPE: {metrics['mape']:.2f}")
-            if metrics.get('directional_accuracy') is not None:
-                print(f"Direction Accuracy: {metrics['directional_accuracy']:.2f}")
+            # Если R² не посчитан стандартной функцией — пересчитываем напрямую
+            # из forecast/test значений (даёт реальное значение, даже отрицательное)
+            r2_val = metrics.get('r2')
+            if r2_val is None:
+                fv = result.get('_forecast_values')
+                tv = result.get('_test_values')
+                if fv is not None and tv is not None:
+                    try:
+                        from sklearn.metrics import r2_score as _r2
+                        mask = ~np.isnan(fv) & ~np.isnan(tv)
+                        if mask.sum() > 1:
+                            r2_val = float(_r2(tv[mask], fv[mask]))
+                    except Exception:
+                        pass
+
+            def _fmt(v, digits=6):
+                if v is None:
+                    return f"{0.0:.{digits}f}"
+                try:
+                    import math
+                    if math.isnan(float(v)) or math.isinf(float(v)):
+                        return f"{0.0:.{digits}f}"
+                    return f"{float(v):.{digits}f}"
+                except Exception:
+                    return f"{0.0:.{digits}f}"
+
+            print(f"MSE: {_fmt(metrics.get('mse'))}")
+            print(f"RMSE: {_fmt(metrics.get('rmse'))}")
+            print(f"MAE: {_fmt(metrics.get('mae'))}")
+            print(f"R²: {_fmt(r2_val)}")
+            print(f"MAPE: {_fmt(metrics.get('mape'), 2)}")
+            print(f"Direction Accuracy: {_fmt(metrics.get('directional_accuracy'), 2)}")
 
         # Backtest: use validation forecast vs test_data for trading signals
         forecast_vals = result.get('_forecast_values')

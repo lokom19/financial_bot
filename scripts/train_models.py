@@ -222,13 +222,14 @@ def extract_metrics(output_text: str) -> Dict[str, Any]:
     """Extract metrics from model output text."""
     # Паттерны для извлечения метрик из текстового вывода модели
     patterns = {
-        # Test metrics
-        'test_mse': r'MSE: ([\d.]+)',
-        'test_rmse': r'RMSE: ([\d.]+)',
-        'test_mae': r'MAE: ([\d.]+)',
-        'test_r2': r'R²: ([\d.]+)',
-        'test_mape': r'MAPE: ([\d.]+)',
-        'test_direction_accuracy': r'Direction Accuracy: ([\d.]+)',
+        # Test metrics — поддерживаем и отрицательные значения
+        # (R² < 0 нормально для time-series моделей при слабом сигнале)
+        'test_mse': r'MSE:\s*([-+]?\d+\.?\d*)',
+        'test_rmse': r'RMSE:\s*([-+]?\d+\.?\d*)',
+        'test_mae': r'MAE:\s*([-+]?\d+\.?\d*)',
+        'test_r2': r'R²:\s*([-+]?\d+\.?\d*)',
+        'test_mape': r'MAPE:\s*([-+]?\d+\.?\d*)',
+        'test_direction_accuracy': r'Direction Accuracy:\s*([-+]?\d+\.?\d*)',
 
         # Predictions
         'current_price': r'Текущая цена: ([\d.]+)',

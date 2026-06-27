@@ -30,7 +30,9 @@ def get_current_user(request: Request, db: Session) -> Optional[User]:
 
 @router.get("/login", response_class=HTMLResponse)
 async def login_page(request: Request):
-    return templates.TemplateResponse("login.html", {"request": request, "error": None})
+    return templates.TemplateResponse(
+        request=request, name="login.html", context={"error": None}
+    )
 
 
 @router.post("/login", response_class=HTMLResponse)
@@ -45,14 +47,16 @@ async def login(
         user = db.query(User).filter(User.username == username).first()
         if not user or not verify_password(password, user.hashed_password):
             return templates.TemplateResponse(
-                "login.html",
-                {"request": request, "error": "Неверное имя пользователя или пароль"},
+                request=request,
+                name="login.html",
+                context={"error": "Неверное имя пользователя или пароль"},
                 status_code=401,
             )
         if not user.is_active:
             return templates.TemplateResponse(
-                "login.html",
-                {"request": request, "error": "Аккаунт заблокирован"},
+                request=request,
+                name="login.html",
+                context={"error": "Аккаунт заблокирован"},
                 status_code=403,
             )
         user.last_login = datetime.utcnow()
@@ -68,7 +72,9 @@ async def login(
 
 @router.get("/register", response_class=HTMLResponse)
 async def register_page(request: Request):
-    return templates.TemplateResponse("register.html", {"request": request, "error": None})
+    return templates.TemplateResponse(
+        request=request, name="register.html", context={"error": None}
+    )
 
 
 @router.post("/register", response_class=HTMLResponse)
@@ -85,23 +91,27 @@ async def register(
     try:
         if password != password2:
             return templates.TemplateResponse(
-                "register.html",
-                {"request": request, "error": "Пароли не совпадают"},
+                request=request,
+                name="register.html",
+                context={"error": "Пароли не совпадают"},
             )
         if len(password) < 6:
             return templates.TemplateResponse(
-                "register.html",
-                {"request": request, "error": "Пароль должен быть не менее 6 символов"},
+                request=request,
+                name="register.html",
+                context={"error": "Пароль должен быть не менее 6 символов"},
             )
         if db.query(User).filter(User.username == username).first():
             return templates.TemplateResponse(
-                "register.html",
-                {"request": request, "error": "Имя пользователя уже занято"},
+                request=request,
+                name="register.html",
+                context={"error": "Имя пользователя уже занято"},
             )
         if db.query(User).filter(User.email == email).first():
             return templates.TemplateResponse(
-                "register.html",
-                {"request": request, "error": "Email уже используется"},
+                request=request,
+                name="register.html",
+                context={"error": "Email уже используется"},
             )
 
         user = User(
@@ -136,7 +146,9 @@ async def profile_page(request: Request):
         user = get_current_user(request, db)
         if not user:
             return RedirectResponse(url="/auth/login", status_code=302)
-        return templates.TemplateResponse("profile.html", {"request": request, "user": user})
+        return templates.TemplateResponse(
+            request=request, name="profile.html", context={"user": user}
+        )
     finally:
         db.close()
 
@@ -157,16 +169,18 @@ async def update_profile(
         existing = db.query(User).filter(User.email == email, User.id != user.id).first()
         if existing:
             return templates.TemplateResponse(
-                "profile.html",
-                {"request": request, "user": user, "error": "Email уже используется"},
+                request=request,
+                name="profile.html",
+                context={"user": user, "error": "Email уже используется"},
             )
         user.full_name = full_name or None
         user.email = email
         db.commit()
         db.refresh(user)
         return templates.TemplateResponse(
-            "profile.html",
-            {"request": request, "user": user, "success": "Профиль обновлён"},
+            request=request,
+            name="profile.html",
+            context={"user": user, "success": "Профиль обновлён"},
         )
     finally:
         db.close()

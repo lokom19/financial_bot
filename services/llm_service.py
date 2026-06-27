@@ -489,6 +489,88 @@ def _parse_report_sections(text: str) -> dict:
     return result
 
 
+TA_EXPLAIN_SYSTEM_PROMPT = """Ты — опытный технический аналитик. Объясняй простым языком новичкам.
+
+ЗАДАЧА: получив значения технических индикаторов по акции, дай краткое (4-6 предложений)
+объяснение что они показывают в данный момент. Без рекомендаций "покупать/продавать" —
+только интерпретация состояния.
+
+Структура ответа:
+1. Тренд (по SMA): краткосрочный / долгосрочный.
+2. Импульс (по RSI, MACD, Stochastic): набирает / теряет / в равновесии.
+3. Зоны (перекупленность / перепроданность / нейтрально).
+4. Волатильность (по диапазону вчера, BB позиции).
+
+Пиши без markdown, без эмодзи, без заголовков типа ##. Только текст с упоминанием цифр.
+Один связный абзац."""
+
+
+def explain_ta_indicators(ticker: str, ta_indicators: dict) -> dict:
+    """
+    Просит LLM объяснить значения технических индикаторов простыми словами.
+    Возвращает {explanation, error}.
+    """
+    if not ta_indicators:
+        return {"explanation": "", "error": "Нет данных технического анализа"}
+
+    # Сборка запроса
+    parts = []
+    rsi = ta_indicators.get("rsi")
+    if rsi is not None:
+        parts.append(f"RSI(14) = {rsi:.1f}")
+    macd = ta_indicators.get("macd")
+    macd_sig = ta_indicators.get("macd_signal")
+    if macd is not None:
+        if macd_sig is not None:
+            parts.append(f"MACD = {macd:.2f}, сигнальная = {macd_sig:.2f}")
+        else:
+            parts.append(f"MACD = {macd:.2f}")
+    stoch = ta_indicators.get("stoch_k")
+    if stoch is not None:
+        parts.append(f"Stochastic K = {stoch:.1f}")
+    sma5 = ta_indicators.get("sma_5")
+    sma20 = ta_indicators.get("sma_20")
+    last_price = ta_indicators.get("last_price")
+    if sma5 is not None and sma20 is not None:
+        parts.append(f"SMA(5) = {sma5:.2f}, SMA(20) = {sma20:.2f}")
+    if last_price is not None:
+        parts.append(f"Текущая цена = {last_price:.2f}")
+    bb = ta_indicators.get("bb_position")
+    if bb is not None:
+        parts.append(f"Положение в полосах Боллинджера = {bb:.2f} (0 = нижняя, 1 = верхняя)")
+    high = ta_indicators.get("last_high")
+    low = ta_indicators.get("last_low")
+    if high is not None and low is not None:
+        rng = high - low
+        rng_pct = (rng / last_price * 100) if last_price else 0
+        parts.append(
+            f"Дневной диапазон: high = {high:.2f}, low = {low:.2f} "
+            f"(размах {rng_pct:.2f}%)"
+        )
+
+    if not parts:
+        return {"explanation": "", "error": "Нет валидных индикаторов для интерпретации"}
+
+    user_message = (
+        f"Акция: {ticker}\n\nПоказатели:\n  - " + "\n  - ".join(parts) +
+        "\n\nОбъясни что они показывают в данный момент."
+    )
+
+    raw = (
+        _get_groq_response_custom(user_message, TA_EXPLAIN_SYSTEM_PROMPT, max_tokens=350)
+        or _get_ollama_response_custom(user_message, TA_EXPLAIN_SYSTEM_PROMPT)
+    )
+
+    if not raw:
+        errs = get_last_errors()
+        return {
+            "explanation": "",
+            "error": "; ".join(f"{k}: {v}" for k, v in errs.items() if v) or "LLM недоступен",
+        }
+
+    return {"explanation": raw.strip(), "error": None}
+
+
 def _get_groq_response_custom(user_message: str, system_prompt: str,
                               max_tokens: int = 500) -> Optional[str]:
     """Версия Groq-запроса с кастомным системным промптом и лимитом токенов."""

@@ -26,7 +26,11 @@ from pydantic_models.model_result import ModelResult
 from auth.models import User, Base as AuthBase
 from auth.security import decode_token
 from auth.router import router as auth_router, COOKIE_NAME
-from services.llm_service import analyze_signal, generate_ticker_report
+from services.llm_service import (
+    analyze_signal,
+    generate_ticker_report,
+    explain_ta_indicators,
+)
 from services.ta_indicators import compute_ta_indicators
 
 load_dotenv()
@@ -290,9 +294,9 @@ async def ticker_page(request: Request, ticker: str):
         db.close()
 
     return templates.TemplateResponse(
-        "ticker_report.html",
-        {
-            "request": request,
+        request=request,
+        name="ticker_report.html",
+        context={
             "current_user": current_user,
             "streamlit_url": STREAMLIT_URL,
             "overview": overview,
@@ -520,6 +524,59 @@ async def ai_reports_history(ticker: str, days: int = 60):
         db.close()
 
 
+# Простой in-memory кеш для TA-объяснений (на день)
+# Ключ: (ticker, data_date) → {explanation, generated_at}
+_TA_EXPLAIN_CACHE: dict = {}
+
+
+@app.get("/api/ticker/{ticker}/explain-ta", tags=["LLM"])
+async def explain_ta(ticker: str, force: bool = False):
+    """
+    AI-объяснение текущих значений технических индикаторов простым языком.
+    Кешируется на день (по data_date). ?force=1 — перегенерировать.
+    """
+    db = SyncSessionLocal()
+    try:
+        overview = _load_ticker_overview(db, ticker)
+    finally:
+        db.close()
+
+    if not overview["ta"]:
+        return JSONResponse(
+            status_code=400,
+            content={"error": "Нет данных технического анализа для этого тикера"},
+        )
+
+    cache_key = (overview["ticker"], overview.get("data_date"))
+    if not force and cache_key in _TA_EXPLAIN_CACHE:
+        cached = _TA_EXPLAIN_CACHE[cache_key]
+        return {
+            "ticker": overview["ticker"],
+            "data_date": overview.get("data_date"),
+            "explanation": cached["explanation"],
+            "cached": True,
+            "generated_at": cached["generated_at"],
+        }
+
+    result = explain_ta_indicators(overview["ticker"], overview["ta"])
+    if result.get("error"):
+        return JSONResponse(status_code=502, content={"error": result["error"]})
+
+    from datetime import datetime as _dt
+    generated_at = _dt.utcnow().isoformat()
+    _TA_EXPLAIN_CACHE[cache_key] = {
+        "explanation": result["explanation"],
+        "generated_at": generated_at,
+    }
+    return {
+        "ticker": overview["ticker"],
+        "data_date": overview.get("data_date"),
+        "explanation": result["explanation"],
+        "cached": False,
+        "generated_at": generated_at,
+    }
+
+
 class TickerReportRequest(BaseModel):
     ticker: str  # либо тикер, либо FIGI
 
@@ -713,9 +770,9 @@ async def read_root(request: Request):
         tickers_list = []
 
     return templates.TemplateResponse(
-        "models_list.html",
-        {
-            "request": request,
+        request=request,
+        name="models_list.html",
+        context={
             "models_info": models_info,
             "current_user": current_user,
             "streamlit_url": STREAMLIT_URL,
@@ -862,9 +919,9 @@ async def view_model(request: Request,
         )
 
         return templates.TemplateResponse(
-            "model_detail.html",
-            {
-                "request": request,
+            request=request,
+            name="model_detail.html",
+            context={
                 "files_data": files_data,
                 "model_name": model_name,
                 "current_signal": signal,
@@ -873,14 +930,15 @@ async def view_model(request: Request,
                 "signal_stats": signal_stats,
                 "current_user": current_user,
                 "streamlit_url": STREAMLIT_URL,
-            }
+            },
         )
 
     except Exception as e:
         logger.error(f"Ошибка при получении данных из базы данных: {e}")
         return templates.TemplateResponse(
-            "error.html",
-            {"request": request, "error_message": str(e)}
+            request=request,
+            name="error.html",
+            context={"error_message": str(e)},
         )
 
 

@@ -59,11 +59,13 @@ if [ ! -d nginx/certbot/conf/live/"$DOMAIN" ]; then
     sleep 10
 
     echo "Запрашиваю SSL-сертификат у Let's Encrypt..."
-    docker compose run --rm certbot certonly \
-        --webroot --webroot-path=/var/www/certbot \
+    # --entrypoint certbot ОБЯЗАТЕЛЬНО — иначе сработает entrypoint из compose
+    # (бесконечный renew-loop) и наш certonly будет проигнорирован.
+    docker compose run --rm --entrypoint certbot certbot \
+        certonly --webroot --webroot-path=/var/www/certbot \
         --email "$EMAIL" --agree-tos --no-eff-email \
-        -d "$DOMAIN" \
-        --non-interactive
+        --non-interactive \
+        -d "$DOMAIN"
 
     echo "Возвращаю полный HTTPS-конфиг..."
     rm nginx/conf.d/app.conf

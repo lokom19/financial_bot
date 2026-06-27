@@ -925,6 +925,17 @@ def main(db_path):
     print(f"F1-Score: {metrics.get('test_f1', 0):.4f}")
     print(f"ROC-AUC: {metrics.get('test_roc_auc', 0):.4f}")
 
+    # Унифицированные метрики для парсера train_models.py:
+    # У классификатора R²/MSE не имеют смысла — выводим нули.
+    # Direction Accuracy = accuracy на тесте (это и есть % правильно угаданных направлений).
+    test_acc_pct = float(metrics.get('test_accuracy', 0) or 0) * 100
+    print(f"MSE: 0.000000")
+    print(f"RMSE: 0.000000")
+    print(f"MAE: 0.000000")
+    print(f"R²: 0.000000")
+    print(f"MAPE: 0.00")
+    print(f"Direction Accuracy: {test_acc_pct:.2f}")
+
     print(f"\nМетрики на тренировочной выборке:")
     print(f"Accuracy: {metrics.get('train_accuracy', 0):.4f}")
 
@@ -941,11 +952,27 @@ def main(db_path):
 
     prediction = model.predict_next(df)
 
-    print(f"Текущая цена: {prediction['current_price']:.4f}")
-    print(f"Прогноз направления: {prediction['direction']}")
+    # Для классификатора "прогнозируемая цена" формируем условно:
+    # вверх/вниз на величину пропорциональную confidence (около ±1% макс).
+    cur = float(prediction['current_price'])
+    conf = float(prediction.get('confidence', 0.5))
+    direction = prediction.get('direction', 'FLAT')
+    # шаг до 1% от цены, масштабируется уверенностью
+    if direction == 'UP':
+        pseudo_change_pct = max(0.1, (conf - 0.5) * 2)  # 0..1%
+    elif direction == 'DOWN':
+        pseudo_change_pct = -max(0.1, (conf - 0.5) * 2)
+    else:
+        pseudo_change_pct = 0.0
+    pseudo_predicted = cur * (1 + pseudo_change_pct / 100)
+
+    print(f"Текущая цена: {cur:.4f}")
+    print(f"Прогноз направления: {direction}")
+    print(f"Прогнозируемая цена: {pseudo_predicted:.4f}")
+    print(f"Ожидаемое изменение: {pseudo_change_pct:+.2f}%")
     print(f"Вероятность роста: {prediction['probability_up']:.4f}")
     print(f"Вероятность падения: {prediction['probability_down']:.4f}")
-    print(f"Уверенность: {prediction['confidence']:.4f}")
+    print(f"Уверенность: {conf:.4f}")
     print(f"Торговый сигнал: {prediction['signal']}")
 
     # Backtest

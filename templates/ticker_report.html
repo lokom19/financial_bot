@@ -40,8 +40,30 @@
         .pill-neutral { background: #e2e3e5; color: #383d41; }
 
         .kvs { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; font-size: 14px; }
-        .kvs .k { color: #888; }
+        .kvs .k { color: #888; display: flex; align-items: center; gap: 6px; }
         .kvs .v { color: #1a1a2e; font-weight: 600; text-align: right; }
+
+        /* Знак вопроса с тултипом */
+        .help-icon {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            width: 15px; height: 15px;
+            border-radius: 50%;
+            background: var(--surface-alt);
+            color: var(--text-muted);
+            font-size: 10px;
+            font-weight: 700;
+            cursor: help;
+            transition: all 0.15s;
+            border: 1px solid var(--border);
+        }
+        .help-icon:hover {
+            background: var(--primary);
+            color: #fff;
+            border-color: var(--primary);
+        }
+        .help-icon[title]:hover::after { content: ''; }
 
         table { width: 100%; border-collapse: collapse; font-size: 13px; }
         th, td { padding: 8px 10px; border-bottom: 1px solid #f0f0f0; text-align: left; }
@@ -274,6 +296,20 @@
         </div>
 
         <!-- ============================================== -->
+        <!-- AI-объяснение технического анализа              -->
+        <!-- ============================================== -->
+        <div class="x-card" style="margin-bottom: 24px; background: linear-gradient(135deg, #faf7ff 0%, #f5f7ff 100%); border: 1px solid #e0e7ff;">
+            <h3 class="x-card-title" style="display: flex; align-items: center; justify-content: space-between;">
+                <span>🤖 AI-объяснение технического анализа</span>
+                <button id="ta-explain-btn" onclick="explainTA(true)" class="x-btn" style="font-size: 11px; padding: 4px 10px;">↻ обновить</button>
+            </h3>
+            <div id="ta-explanation" style="font-size: 14px; line-height: 1.6; color: var(--text); white-space: pre-wrap;">
+                <span class="text-mute">Загрузка…</span>
+            </div>
+            <div id="ta-explain-meta" style="margin-top: 10px; font-size: 11px; color: var(--text-soft); font-style: italic;"></div>
+        </div>
+
+        <!-- ============================================== -->
         <!-- НОВОЕ: История консолидированных AI-вердиктов  -->
         <!-- ============================================== -->
         <div class="x-card" style="margin-bottom: 20px;">
@@ -288,9 +324,17 @@
 
         <!-- ============================================== -->
         <!-- Старая: история per-модельных прогнозов        -->
+        <!-- Скрыта по умолчанию, разворачивается по клику   -->
         <!-- ============================================== -->
         <div class="x-card" style="margin-bottom: 20px;">
-            <h3 class="x-card-title">📋 История предсказаний vs реальность <span style="font-weight:400; text-transform:none; color: var(--text-soft); letter-spacing:0;">(детали по моделям)</span></h3>
+            <h3 class="x-card-title"
+                onclick="toggleModelsHistory()"
+                style="cursor: pointer; user-select: none; display: flex; align-items: center; gap: 8px;">
+                <span id="models-chevron" style="display: inline-block; transition: transform 0.2s; font-size: 10px; color: var(--text-muted);">▶</span>
+                📋 История предсказаний vs реальность
+                <span style="font-weight:400; text-transform:none; color: var(--text-soft); letter-spacing:0;">(детали по моделям — клик чтобы развернуть)</span>
+            </h3>
+            <div id="models-history-body" style="display: none;">
 
             <div id="hit-rate-summary" style="margin-bottom: 18px;"></div>
 
@@ -325,6 +369,7 @@
                     <span class="x-spinner"></span> Загрузка данных…
                 </div>
             </div>
+            </div><!-- /#models-history-body -->
         </div>
 
         <style>
@@ -716,10 +761,55 @@
             wrap.innerHTML = html;
         }
 
-        // Загрузка при открытии
+        // ============================================================
+        // Сворачивание секции "детали по моделям"
+        // ============================================================
+        let MODELS_HISTORY_LOADED = false;
+        function toggleModelsHistory() {
+            const body = document.getElementById('models-history-body');
+            const chev = document.getElementById('models-chevron');
+            const isHidden = body.style.display === 'none';
+            body.style.display = isHidden ? 'block' : 'none';
+            chev.style.transform = isHidden ? 'rotate(90deg)' : 'rotate(0deg)';
+            // Lazy-load: грузим таблицу только при первом разворачивании
+            if (isHidden && !MODELS_HISTORY_LOADED) {
+                loadHistory(60);
+                MODELS_HISTORY_LOADED = true;
+            }
+        }
+
+        // ============================================================
+        // AI-объяснение технического анализа
+        // ============================================================
+        async function explainTA(force) {
+            const wrap = document.getElementById('ta-explanation');
+            const meta = document.getElementById('ta-explain-meta');
+            const btn = document.getElementById('ta-explain-btn');
+            wrap.innerHTML = '<span class="x-spinner"></span> <span class="text-mute">Запрашиваю объяснение у LLM…</span>';
+            meta.textContent = '';
+            btn.disabled = true;
+            try {
+                const url = `/api/ticker/${encodeURIComponent(TICKER)}/explain-ta${force ? '?force=1' : ''}`;
+                const resp = await fetch(url);
+                const data = await resp.json();
+                if (data.error) {
+                    wrap.innerHTML = `<span class="text-danger">⚠ ${data.error}</span>`;
+                    return;
+                }
+                wrap.textContent = data.explanation;
+                const ts = data.generated_at ? new Date(data.generated_at).toLocaleString('ru-RU') : '';
+                meta.textContent = (data.cached ? '✓ из кеша' : '✓ только что') + (ts ? ` — ${ts}` : '');
+            } catch (e) {
+                wrap.innerHTML = `<span class="text-danger">⚠ Сетевая ошибка: ${e.message}</span>`;
+            } finally {
+                btn.disabled = false;
+            }
+        }
+
+        // При старте грузим главную AI-таблицу + AI-объяснение TA
         function startTable() {
-            loadHistory(60);
             loadAIHistory();
+            explainTA(false);
         }
         if (document.readyState === 'loading') {
             document.addEventListener('DOMContentLoaded', startTable);
