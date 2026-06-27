@@ -274,6 +274,14 @@ def extract_metrics(output_text: str) -> Dict[str, Any]:
         else:
             metrics[key] = None
 
+    # Sanity-фильтры: win_rate / direction_accuracy / mape должны быть в [0..100]
+    # У некоторых моделей (prophet/lstm/tcn) total_trades=1 ломает формулу
+    # win_rate = profitable/total*100 → выходит >100. Откидываем мусор.
+    for pct_key in ('win_rate', 'test_direction_accuracy', 'train_direction_accuracy'):
+        v = metrics.get(pct_key)
+        if v is not None and not (0 <= v <= 100):
+            metrics[pct_key] = None
+
     # Извлекаем период данных
     period_match = re.search(
         r'за период с (\d{4}-\d{2}-\d{2})[T\s][\d:]+\s+по\s+(\d{4}-\d{2}-\d{2})',
