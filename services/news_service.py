@@ -123,5 +123,8 @@ def fetch_news_for_ticker(ticker: str, max_items: int = 5,
             logger.warning("news fetch error for %s: %s", ticker, e)
             break
 
-    _CACHE[cache_key] = (now, all_news)
+    # Не кешируем пустые результаты — чтобы временные ошибки парсинга/сети
+    # не блокировали повторные попытки на 30 минут.
+    if all_news:
+        _CACHE[cache_key] = (now, all_news)
     return all_news
