@@ -25,13 +25,18 @@ from utils.calculate_weight import calculate_model_score
 from pydantic_models.model_result import ModelResult
 from auth.models import User, Base as AuthBase
 from auth.security import decode_token
+from auth.security_middleware import limiter
 from auth.router import router as auth_router, COOKIE_NAME
+
+from slowapi import _rate_limit_exceeded_handler
+from slowapi.errors import RateLimitExceeded
 from services.llm_service import (
     analyze_signal,
     generate_ticker_report,
     explain_ta_indicators,
 )
 from services.ta_indicators import compute_ta_indicators
+from services.news_service import fetch_news_for_ticker
 
 load_dotenv()
 logging.basicConfig(level=logging.INFO,
@@ -147,6 +152,10 @@ OUTPUT_DIR = BASE_DIR / "output"
 # Streamlit dashboard URL (shown in top-bar nav)
 STREAMLIT_URL = os.getenv("STREAMLIT_URL", "http://localhost:8501")
 
+# Rate limiter
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+
 # Include auth router
 app.include_router(auth_router)
 
@@ -175,7 +184,8 @@ class LLMAnalyzeRequest(BaseModel):
 
 
 @app.post("/api/llm/analyze", tags=["LLM"])
-async def llm_analyze(payload: LLMAnalyzeRequest):
+@limiter.limit("30/hour")
+async def llm_analyze(request: Request, payload: LLMAnalyzeRequest):
     """Query LLM to analyze a trading signal."""
     result = analyze_signal(
         ticker=payload.ticker,
@@ -554,7 +564,8 @@ _TA_EXPLAIN_CACHE: dict = {}
 
 
 @app.get("/api/ticker/{ticker}/explain-ta", tags=["LLM"])
-async def explain_ta(ticker: str, force: bool = False):
+@limiter.limit("30/hour")
+async def explain_ta(request: Request, ticker: str, force: bool = False):
     """
     AI-объяснение текущих значений технических индикаторов простым языком.
     Кешируется на день (по data_date). ?force=1 — перегенерировать.
@@ -601,12 +612,28 @@ async def explain_ta(ticker: str, force: bool = False):
     }
 
 
+@app.get("/api/ticker/{ticker}/news", tags=["News"])
+@limiter.limit("60/hour")
+async def ticker_news(request: Request, ticker: str, limit: int = 5):
+    """Новостной фид по тикеру (smart-lab.ru, кеш 30 мин)."""
+    try:
+        items = fetch_news_for_ticker(ticker.upper(), max_items=limit)
+        return {"ticker": ticker.upper(), "items": items, "count": len(items)}
+    except Exception as e:
+        logger.error(f"news endpoint error: {e}")
+        return JSONResponse(
+            status_code=502,
+            content={"error": "Не удалось получить новости", "items": []},
+        )
+
+
 class TickerReportRequest(BaseModel):
     ticker: str  # либо тикер, либо FIGI
 
 
 @app.post("/api/llm/ticker-report", tags=["LLM"])
-async def llm_ticker_report(payload: TickerReportRequest):
+@limiter.limit("20/hour")
+async def llm_ticker_report(request: Request, payload: TickerReportRequest):
     """
     Развёрнутый отчёт от LLM по тикеру:
     использует ВСЕ доступные модели + TA-индикаторы.
@@ -624,13 +651,19 @@ async def llm_ticker_report(payload: TickerReportRequest):
             content={"error": f"Нет данных моделей для тикера {payload.ticker}"},
         )
 
-    # news_items пока None — задел на будущее
+    # Подтягиваем новости (с кешем 30 минут)
+    try:
+        news_items = fetch_news_for_ticker(overview["ticker"], max_items=5)
+    except Exception as e:
+        logger.warning(f"news fetch failed: {e}")
+        news_items = None
+
     report = generate_ticker_report(
         ticker=overview["ticker"],
         current_price=overview["current_price"] or 0.0,
         models_data=overview["models"],
         ta_indicators=overview["ta"],
-        news_items=None,
+        news_items=news_items,
         data_date=overview.get("data_date"),
         prediction_date=overview.get("prediction_date"),
     )

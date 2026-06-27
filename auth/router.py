@@ -1,3 +1,4 @@
+import os
 from datetime import datetime
 from typing import Optional
 
@@ -8,6 +9,7 @@ from sqlalchemy.orm import Session
 
 from auth.models import User
 from auth.security import hash_password, verify_password, create_access_token, decode_token
+from auth.security_middleware import limiter, verify_turnstile, is_turnstile_enabled, TURNSTILE_SITE_KEY
 
 router = APIRouter(prefix="/auth", tags=["Auth"])
 templates = Jinja2Templates(directory="templates")
@@ -31,11 +33,13 @@ def get_current_user(request: Request, db: Session) -> Optional[User]:
 @router.get("/login", response_class=HTMLResponse)
 async def login_page(request: Request):
     return templates.TemplateResponse(
-        request=request, name="login.html", context={"error": None}
+        request=request, name="login.html",
+        context={"error": None, "turnstile_site_key": TURNSTILE_SITE_KEY},
     )
 
 
 @router.post("/login", response_class=HTMLResponse)
+@limiter.limit("5/5minute")
 async def login(
     request: Request,
     username: str = Form(...),
@@ -64,7 +68,13 @@ async def login(
 
         token = create_access_token({"sub": user.username})
         response = RedirectResponse(url="/", status_code=302)
-        response.set_cookie(COOKIE_NAME, token, httponly=True, max_age=60 * 60 * 24 * 7)
+        response.set_cookie(
+            COOKIE_NAME, token,
+            httponly=True,
+            max_age=60 * 60 * 24 * 7,
+            samesite="lax",
+            secure=os.getenv("COOKIE_SECURE", "false").lower() == "true",
+        )
         return response
     finally:
         db.close()
@@ -73,11 +83,13 @@ async def login(
 @router.get("/register", response_class=HTMLResponse)
 async def register_page(request: Request):
     return templates.TemplateResponse(
-        request=request, name="register.html", context={"error": None}
+        request=request, name="register.html",
+        context={"error": None, "turnstile_site_key": TURNSTILE_SITE_KEY},
     )
 
 
 @router.post("/register", response_class=HTMLResponse)
+@limiter.limit("3/hour")
 async def register(
     request: Request,
     username: str = Form(...),
@@ -85,34 +97,40 @@ async def register(
     full_name: str = Form(""),
     password: str = Form(...),
     password2: str = Form(...),
+    cf_turnstile_response: str = Form(default=""),
 ):
+    # Проверка CAPTCHA (если настроена)
+    if is_turnstile_enabled():
+        client_ip = request.headers.get("x-forwarded-for", "").split(",")[0].strip() \
+                    or request.client.host
+        if not verify_turnstile(cf_turnstile_response, client_ip):
+            return templates.TemplateResponse(
+                request=request, name="register.html",
+                context={
+                    "error": "Не удалось проверить капчу. Попробуйте ещё раз.",
+                    "turnstile_site_key": TURNSTILE_SITE_KEY,
+                },
+                status_code=400,
+            )
+
     from main import get_db_session
     db = get_db_session()
     try:
+        # Хелпер чтобы каждый раз не передавать turnstile_site_key вручную
+        def _err(msg: str):
+            return templates.TemplateResponse(
+                request=request,
+                name="register.html",
+                context={"error": msg, "turnstile_site_key": TURNSTILE_SITE_KEY},
+            )
         if password != password2:
-            return templates.TemplateResponse(
-                request=request,
-                name="register.html",
-                context={"error": "Пароли не совпадают"},
-            )
+            return _err("Пароли не совпадают")
         if len(password) < 6:
-            return templates.TemplateResponse(
-                request=request,
-                name="register.html",
-                context={"error": "Пароль должен быть не менее 6 символов"},
-            )
+            return _err("Пароль должен быть не менее 6 символов")
         if db.query(User).filter(User.username == username).first():
-            return templates.TemplateResponse(
-                request=request,
-                name="register.html",
-                context={"error": "Имя пользователя уже занято"},
-            )
+            return _err("Имя пользователя уже занято")
         if db.query(User).filter(User.email == email).first():
-            return templates.TemplateResponse(
-                request=request,
-                name="register.html",
-                context={"error": "Email уже используется"},
-            )
+            return _err("Email уже используется")
 
         user = User(
             username=username,
@@ -125,7 +143,13 @@ async def register(
 
         token = create_access_token({"sub": user.username})
         response = RedirectResponse(url="/", status_code=302)
-        response.set_cookie(COOKIE_NAME, token, httponly=True, max_age=60 * 60 * 24 * 7)
+        response.set_cookie(
+            COOKIE_NAME, token,
+            httponly=True,
+            max_age=60 * 60 * 24 * 7,
+            samesite="lax",
+            secure=os.getenv("COOKIE_SECURE", "false").lower() == "true",
+        )
         return response
     finally:
         db.close()
