@@ -37,6 +37,7 @@ from services.llm_service import (
 )
 from services.ta_indicators import compute_ta_indicators
 from services.news_service import fetch_news_for_ticker
+from services.performance_tracker import compute_recent_hit_rates
 
 load_dotenv()
 logging.basicConfig(level=logging.INFO,
@@ -245,6 +246,11 @@ def _load_ticker_overview(db: Session, ticker_or_figi: str) -> dict:
         .all()
     )
 
+    # Recent hit rates по каждой модели (live точность за 5/30 дней) —
+    # критически важная метрика для LLM. R² из training-сета мог устареть,
+    # эти числа показывают реальное качество прогнозов модели сейчас.
+    recent_perf = compute_recent_hit_rates(engine, figi) if figi else {}
+
     models = []
     r2_vals, dir_vals = [], []
     current_price = None
@@ -254,6 +260,11 @@ def _load_ticker_overview(db: Session, ticker_or_figi: str) -> dict:
             current_price = float(r.current_price)
         if r.timestamp and (last_training_dt is None or r.timestamp > last_training_dt):
             last_training_dt = r.timestamp
+        # Recent hit rate (live) — самая важная метрика "доверия"
+        perf = recent_perf.get(r.model_name, {})
+        recent5 = perf.get(5, {})
+        recent30 = perf.get(30, {})
+
         models.append({
             "model_name": r.model_name,
             "signal": r.trading_signal,
@@ -266,6 +277,11 @@ def _load_ticker_overview(db: Session, ticker_or_figi: str) -> dict:
             "predicted_price": float(r.predicted_price)
                 if r.predicted_price is not None else None,
             "trained_at": r.timestamp.isoformat() if r.timestamp else None,
+            # Новые поля: live точность за последние 5/30 дней
+            "recent_hit_rate_5d": recent5.get("hit_rate"),
+            "recent_hit_rate_30d": recent30.get("hit_rate"),
+            "recent_samples_5d": recent5.get("total", 0),
+            "recent_samples_30d": recent30.get("total", 0),
         })
         if r.test_r2 is not None:
             r2_vals.append(float(r.test_r2))

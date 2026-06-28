@@ -401,27 +401,43 @@
                         <tr>
                             <th>Модель</th>
                             <th>Сигнал</th>
+                            <th class="right" title="Реальная точность последних 30 живых прогнозов">🔥 Live 30d</th>
+                            <th class="right" title="Последние 5 живых прогнозов — текущий импульс">Live 5d</th>
                             <th class="right">R²</th>
-                            <th class="right">Direction %</th>
+                            <th class="right">Hist Dir%</th>
                             <th class="right">Прогноз цены</th>
                             <th class="right">Ожид. изм. %</th>
-                            <th class="right">Win Rate</th>
                         </tr>
                     </thead>
                     <tbody>
                         {% for m in overview.models %}
+                        {# Цвет для live-точности: >=55% зелёный, <=45% красный #}
+                        {% set live30 = m.recent_hit_rate_30d %}
+                        {% set live5 = m.recent_hit_rate_5d %}
                         <tr>
                             <td><b>{{ m.model_name }}</b></td>
                             <td class="sig-{{ (m.signal or 'neutral')|lower }}">{{ m.signal or '—' }}</td>
+                            <td class="right" style="font-weight: 600; {% if live30 is not none and live30 >= 55 %}color: var(--success);{% elif live30 is not none and live30 <= 45 %}color: var(--danger);{% endif %}">
+                                {% if live30 is not none %}
+                                    {{ "%.0f"|format(live30) }}%
+                                    <small class="text-mute" style="font-weight:400; font-size:11px;">({{ m.recent_samples_30d }})</small>
+                                {% else %}—{% endif %}
+                            </td>
+                            <td class="right" style="{% if live5 is not none and live5 >= 60 %}color: var(--success);{% elif live5 is not none and live5 <= 40 %}color: var(--danger);{% endif %}">
+                                {% if live5 is not none %}{{ "%.0f"|format(live5) }}%{% else %}—{% endif %}
+                            </td>
                             <td class="right">{{ "%.3f"|format(m.r2) if m.r2 is not none else '—' }}</td>
                             <td class="right">{{ "%.1f"|format(m.direction_accuracy) if m.direction_accuracy is not none else '—' }}</td>
                             <td class="right">{{ "%.2f"|format(m.predicted_price) if m.predicted_price is not none else '—' }}</td>
                             <td class="right">{{ "%+.2f"|format(m.expected_change) if m.expected_change is not none else '—' }}</td>
-                            <td class="right">{{ "%.1f"|format(m.win_rate) if m.win_rate is not none else '—' }}</td>
                         </tr>
                         {% endfor %}
                     </tbody>
                 </table>
+            </div>
+            <div style="font-size: 11px; color: var(--text-muted); margin-top: 8px; font-style: italic;">
+                🔥 Live 30d — реальная точность модели за последние 30 прогнозов с известным результатом.
+                В скобках количество резолвленных прогнозов. Зелёный ≥ 55%, красный ≤ 45%.
             </div>
         </div>
 

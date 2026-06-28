@@ -237,12 +237,28 @@ def analyze_signal(
 REPORT_SYSTEM_PROMPT = """Ты — главный аналитик инвестиционного фонда с 20-летним стажем.
 
 ЗАДАЧА: подготовь развёрнутый аналитический отчёт по конкретной акции на основе:
-1. Прогнозов всех ML/DL моделей (название, сигнал, R², Direction Accuracy)
+1. Прогнозов всех ML/DL моделей (название, сигнал, R², historical Direction,
+   а также LIVE last30d / last5d — реальная точность последних прогнозов)
 2. Технических индикаторов (RSI, MACD, Stochastic, тренд, BB)
 3. Новостного фона (если передан)
 
-МЕТРИКИ КАЧЕСТВА МОДЕЛЕЙ:
-- R² > 0.7 отлично, 0.5-0.7 хорошо, <0.5 слабо
+ИЕРАРХИЯ ДОВЕРИЯ К МОДЕЛЯМ (важно!):
+1. LIVE last30d — главный показатель. Это реальная точность модели за
+   последние 30 живых прогнозов. Если >55% — модель доказала свою адекватность.
+   Если <45% — модель сейчас ошибается чаще чем угадывает.
+2. LIVE last5d — текущий импульс модели (полезно если last30d ~50%).
+3. R² и historical Direction Accuracy — оценки с момента обучения, могли устареть.
+   Используй как вспомогательную информацию.
+
+ВЗВЕШЕННЫЙ КОНСЕНСУС:
+Если в данных есть "ВЗВЕШЕННЫЙ консенсус" — он считается с учётом live-точности:
+модели с last30d >= 55% имеют вес 2x, с last30d < 45% имеют вес 0.5x.
+Доверяй ему больше чем простому распределению.
+
+МЕТРИКИ КАЧЕСТВА:
+- LIVE last30d > 55% отлично, 50-55% средне, <50% слабо
+- R² > 0.7 отлично, 0.5-0.7 хорошо, <0.5 слабо (но R² на абсолютной цене
+  всегда высокий, поэтому смотри в первую очередь на LIVE)
 - Direction > 60% отлично, 55-60% хорошо, <55% слабо
 
 ФОРМАТ ОТВЕТА (строго придерживайся!):
@@ -310,21 +326,61 @@ def generate_ticker_report(
     else:
         lines = []
         signals_count = {"BUY": 0, "SELL": 0, "HOLD": 0, "NEUTRAL": 0}
+
+        # Если есть данные по live-точности — также собираем
+        # ВЗВЕШЕННЫЙ консенсус: модели с recent_hit_rate >= 55% имеют вес 2x.
+        weighted_signals = {"BUY": 0.0, "SELL": 0.0, "HOLD": 0.0, "NEUTRAL": 0.0}
+
         for m in models_data:
             sig = (m.get("signal") or "?").upper()
             signals_count[sig] = signals_count.get(sig, 0) + 1
             r2 = m.get("r2") or 0
             da = m.get("direction_accuracy") or 0
+            hit5 = m.get("recent_hit_rate_5d")
+            hit30 = m.get("recent_hit_rate_30d")
+            n5 = m.get("recent_samples_5d", 0)
+            n30 = m.get("recent_samples_30d", 0)
+
+            # Расчёт веса в консенсусе
+            weight = 1.0
+            if hit30 is not None and hit30 >= 55:
+                weight = 2.0
+            elif hit30 is not None and hit30 < 45:
+                weight = 0.5
+            weighted_signals[sig] = weighted_signals.get(sig, 0.0) + weight
+
+            # Форматируем строку с приоритетом на live-точность
+            live_part = ""
+            if hit30 is not None and n30 >= 3:
+                live_part = f", 🔥 LIVE last30d={hit30:.0f}% ({n30} прогн.)"
+                if hit5 is not None and n5 >= 2:
+                    live_part += f", last5d={hit5:.0f}%"
+            else:
+                live_part = ", LIVE: нет статистики"
+
             lines.append(
                 f"  - {m.get('model_name','?')}: {sig}, "
-                f"R²={r2:.3f}, Direction={da:.1f}%"
+                f"R²={r2:.3f}, hist_dir={da:.1f}%{live_part}"
             )
+
         total = sum(signals_count.values())
         consensus_line = ", ".join(
             f"{k}={v}/{total}" for k, v in signals_count.items() if v > 0
         )
+
+        # Взвешенный консенсус (если есть значимые веса)
+        wtotal = sum(weighted_signals.values())
+        if wtotal > 0:
+            weighted_line = ", ".join(
+                f"{k}={v:.1f}" for k, v in weighted_signals.items() if v > 0
+            )
+            weighted_block = f"\nВЗВЕШЕННЫЙ консенсус (по live-точности): {weighted_line}"
+        else:
+            weighted_block = ""
+
         models_block = (
-            f"Распределение сигналов: {consensus_line}\n"
+            f"Распределение сигналов (равные веса): {consensus_line}"
+            + weighted_block + "\n"
             + "\n".join(lines)
         )
 
