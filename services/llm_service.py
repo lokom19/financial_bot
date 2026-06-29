@@ -545,6 +545,100 @@ def _parse_report_sections(text: str) -> dict:
     return result
 
 
+TA_SUMMARY_SYSTEM_PROMPT = """Ты — опытный технический аналитик. Твоя задача — дать ОДНОЗНАЧНЫЙ
+короткий вывод по техническим индикаторам акции.
+
+ФОРМАТ ОТВЕТА (строго!):
+ВЫВОД: <БЫЧИЙ или МЕДВЕЖИЙ или СМЕШАННЫЙ или НЕЙТРАЛЬНЫЙ>
+СИЛА: <сильный или умеренный или слабый>
+КРАТКО: <одно предложение по-русски, что именно говорят индикаторы>
+КЛЮЧЕВЫЕ ИНДИКАТОРЫ: <2-3 индикатора через запятую, которые повлияли больше всего>
+
+ПРАВИЛА:
+- БЫЧИЙ: преобладают сигналы роста (RSI<30, MACD>сигнальной, цена выше SMA, BB<0.3)
+- МЕДВЕЖИЙ: преобладают сигналы падения (RSI>70, MACD<сигнальной, цена ниже SMA, BB>0.7)
+- СМЕШАННЫЙ: индикаторы противоречат друг другу
+- НЕЙТРАЛЬНЫЙ: все близко к серединам, нет ясного направления
+
+Без markdown, без эмодзи. Точно следуй формату."""
+
+
+def summarize_ta_indicators(ticker: str, ta_indicators: dict) -> dict:
+    """
+    Короткий вывод по техническим индикаторам.
+    Возвращает {verdict, strength, summary, key_indicators, error}.
+    """
+    if not ta_indicators:
+        return {"verdict": "UNKNOWN", "strength": "—",
+                "summary": "", "key_indicators": "",
+                "error": "Нет данных TA"}
+
+    # Собираем компактный текст с индикаторами
+    parts = []
+    rsi = ta_indicators.get("rsi")
+    if rsi is not None:
+        parts.append(f"RSI(14)={rsi:.1f}")
+    macd = ta_indicators.get("macd")
+    macd_sig = ta_indicators.get("macd_signal")
+    if macd is not None and macd_sig is not None:
+        parts.append(f"MACD={macd:.2f}, сигн={macd_sig:.2f}")
+    stoch = ta_indicators.get("stoch_k")
+    if stoch is not None:
+        parts.append(f"Stoch K={stoch:.1f}")
+    sma5 = ta_indicators.get("sma_5")
+    sma20 = ta_indicators.get("sma_20")
+    if sma5 is not None and sma20 is not None:
+        parts.append(f"SMA5={sma5:.2f}, SMA20={sma20:.2f}")
+    bb = ta_indicators.get("bb_position")
+    if bb is not None:
+        parts.append(f"BB позиция={bb:.2f}")
+    price = ta_indicators.get("last_price")
+    if price is not None:
+        parts.append(f"Цена={price:.2f}")
+
+    if not parts:
+        return {"verdict": "UNKNOWN", "strength": "—",
+                "summary": "", "key_indicators": "",
+                "error": "Нет валидных индикаторов"}
+
+    user_message = f"Акция: {ticker}\nПоказатели: {'; '.join(parts)}\n\nДай вывод в требуемом формате."
+
+    raw = (
+        _get_groq_response_custom(user_message, TA_SUMMARY_SYSTEM_PROMPT, max_tokens=200)
+        or _get_ollama_response_custom(user_message, TA_SUMMARY_SYSTEM_PROMPT)
+    )
+    if not raw:
+        errs = get_last_errors()
+        return {
+            "verdict": "UNKNOWN", "strength": "—",
+            "summary": "", "key_indicators": "",
+            "error": "; ".join(f"{k}: {v}" for k, v in errs.items() if v) or "LLM недоступен",
+        }
+
+    # Парсим разделы
+    import re as _re
+    result = {"verdict": "UNKNOWN", "strength": "—",
+              "summary": "", "key_indicators": "", "error": None}
+
+    m = _re.search(r"ВЫВОД[:\s]+(\S+)", raw, _re.IGNORECASE)
+    if m:
+        result["verdict"] = m.group(1).strip().upper().rstrip('.,;:')
+
+    m = _re.search(r"СИЛА[:\s]+(\S+)", raw, _re.IGNORECASE)
+    if m:
+        result["strength"] = m.group(1).strip().lower().rstrip('.,;:')
+
+    m = _re.search(r"КРАТКО[:\s]+(.+?)(?:\n[A-ЯЁ]{3,}|\Z)", raw, _re.DOTALL | _re.IGNORECASE)
+    if m:
+        result["summary"] = m.group(1).strip()
+
+    m = _re.search(r"КЛЮЧЕВЫЕ ИНДИКАТОРЫ[:\s]+(.+?)(?:\n[A-ЯЁ]{3,}|\Z)", raw, _re.DOTALL | _re.IGNORECASE)
+    if m:
+        result["key_indicators"] = m.group(1).strip()
+
+    return result
+
+
 TA_EXPLAIN_SYSTEM_PROMPT = """Ты — опытный технический аналитик. Объясняй простым языком новичкам.
 
 ЗАДАЧА: получив значения технических индикаторов по акции, дай краткое (4-6 предложений)

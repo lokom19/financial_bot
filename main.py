@@ -34,6 +34,7 @@ from services.llm_service import (
     analyze_signal,
     generate_ticker_report,
     explain_ta_indicators,
+    summarize_ta_indicators,
 )
 from services.ta_indicators import compute_ta_indicators
 from services.news_service import fetch_news_for_ticker
@@ -251,6 +252,14 @@ def _load_ticker_overview(db: Session, ticker_or_figi: str) -> dict:
     # эти числа показывают реальное качество прогнозов модели сейчас.
     recent_perf = compute_recent_hit_rates(engine, figi) if figi else {}
 
+    # Пороги для auto-disable:
+    # Если за последние 30 дней с n>=10 прогнозов модель угадывала < 40% —
+    # она хуже монетки и временно выключается из консенсуса/LLM-payload.
+    # Можно настроить через env, дефолт консервативный.
+    import os as _os
+    DISABLE_MIN_SAMPLES = int(_os.getenv("MODEL_DISABLE_MIN_SAMPLES", "10"))
+    DISABLE_HIT_RATE_THRESHOLD = float(_os.getenv("MODEL_DISABLE_HIT_RATE", "40"))
+
     models = []
     r2_vals, dir_vals = [], []
     current_price = None
@@ -264,6 +273,15 @@ def _load_ticker_overview(db: Session, ticker_or_figi: str) -> dict:
         perf = recent_perf.get(r.model_name, {})
         recent5 = perf.get(5, {})
         recent30 = perf.get(30, {})
+
+        # Auto-disable: модель плохо работает live → выключаем из консенсуса
+        hit30 = recent30.get("hit_rate")
+        n30 = recent30.get("total", 0)
+        is_disabled = (
+            hit30 is not None
+            and n30 >= DISABLE_MIN_SAMPLES
+            and hit30 < DISABLE_HIT_RATE_THRESHOLD
+        )
 
         models.append({
             "model_name": r.model_name,
@@ -282,6 +300,7 @@ def _load_ticker_overview(db: Session, ticker_or_figi: str) -> dict:
             "recent_hit_rate_30d": recent30.get("hit_rate"),
             "recent_samples_5d": recent5.get("total", 0),
             "recent_samples_30d": recent30.get("total", 0),
+            "is_disabled": is_disabled,
         })
         if r.test_r2 is not None:
             r2_vals.append(float(r.test_r2))
@@ -308,12 +327,18 @@ def _load_ticker_overview(db: Session, ticker_or_figi: str) -> dict:
         except Exception:
             pass
 
-    # Подсчёт сигналов
+    # Подсчёт сигналов — ТОЛЬКО среди активных моделей
+    # (отключённые исключены, они не должны влиять на консенсус)
     signals = {"BUY": 0, "SELL": 0, "HOLD": 0, "NEUTRAL": 0}
     for m in models:
+        if m.get("is_disabled"):
+            continue
         s = (m["signal"] or "").upper()
         if s in signals:
             signals[s] += 1
+
+    disabled_count = sum(1 for m in models if m.get("is_disabled"))
+    active_count = len(models) - disabled_count
 
     return {
         "ticker": ticker_name,
@@ -321,6 +346,8 @@ def _load_ticker_overview(db: Session, ticker_or_figi: str) -> dict:
         "current_price": current_price,
         "models": models,
         "models_count": len(models),
+        "active_count": active_count,
+        "disabled_count": disabled_count,
         "signals": signals,
         "r2_avg": sum(r2_vals) / len(r2_vals) if r2_vals else None,
         "direction_avg": sum(dir_vals) / len(dir_vals) if dir_vals else None,
@@ -574,9 +601,10 @@ async def ai_reports_history(ticker: str, days: int = 60):
         db.close()
 
 
-# Простой in-memory кеш для TA-объяснений (на день)
+# Простой in-memory кеш для TA-объяснений и резюме (на день)
 # Ключ: (ticker, data_date) → {explanation, generated_at}
 _TA_EXPLAIN_CACHE: dict = {}
+_TA_SUMMARY_CACHE: dict = {}
 
 
 @app.get("/api/ticker/{ticker}/explain-ta", tags=["LLM"])
@@ -643,6 +671,45 @@ async def ticker_news(request: Request, ticker: str, limit: int = 5):
         )
 
 
+@app.get("/api/ticker/{ticker}/ta-summary", tags=["LLM"])
+@limiter.limit("30/hour")
+async def ta_summary(request: Request, ticker: str, force: bool = False):
+    """
+    Краткий вывод по техническим индикаторам:
+    БЫЧИЙ / МЕДВЕЖИЙ / СМЕШАННЫЙ / НЕЙТРАЛЬНЫЙ + одно предложение пояснения.
+    Кеш на день.
+    """
+    db = SyncSessionLocal()
+    try:
+        overview = _load_ticker_overview(db, ticker)
+    finally:
+        db.close()
+
+    if not overview["ta"]:
+        return JSONResponse(status_code=400, content={"error": "Нет данных TA"})
+
+    cache_key = (overview["ticker"], overview.get("data_date"))
+    if not force and cache_key in _TA_SUMMARY_CACHE:
+        return {**_TA_SUMMARY_CACHE[cache_key], "cached": True}
+
+    result = summarize_ta_indicators(overview["ticker"], overview["ta"])
+    if result.get("error"):
+        return JSONResponse(status_code=502, content={"error": result["error"]})
+
+    from datetime import datetime as _dt
+    payload = {
+        "ticker": overview["ticker"],
+        "data_date": overview.get("data_date"),
+        "verdict": result["verdict"],
+        "strength": result["strength"],
+        "summary": result["summary"],
+        "key_indicators": result["key_indicators"],
+        "generated_at": _dt.utcnow().isoformat(),
+    }
+    _TA_SUMMARY_CACHE[cache_key] = payload
+    return {**payload, "cached": False}
+
+
 class TickerReportRequest(BaseModel):
     ticker: str  # либо тикер, либо FIGI
 
@@ -674,10 +741,14 @@ async def llm_ticker_report(request: Request, payload: TickerReportRequest):
         logger.warning(f"news fetch failed: {e}")
         news_items = None
 
+    # Не передаём отключённые модели — они исторически плохо угадывают,
+    # их прогнозы могут только запутать LLM.
+    active_models = [m for m in overview["models"] if not m.get("is_disabled")]
+
     report = generate_ticker_report(
         ticker=overview["ticker"],
         current_price=overview["current_price"] or 0.0,
-        models_data=overview["models"],
+        models_data=active_models,
         ta_indicators=overview["ta"],
         news_items=news_items,
         data_date=overview.get("data_date"),

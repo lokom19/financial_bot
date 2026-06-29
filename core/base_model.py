@@ -51,6 +51,13 @@ class BaseTradeModel(ABC):
     # Model name for identification
     MODEL_NAME: str = "base"
 
+    # Какой целевой столбец предсказываем:
+    #   "next_close"  — абсолютная цена следующего бара (старое поведение,
+    #                   высокий R² но плохой Direction)
+    #   "next_return" — относительное изменение в % (новое, лучше для Direction)
+    # Все наследники по умолчанию используют next_return.
+    TARGET_COLUMN: str = "next_return"
+
     def __init__(self, test_size: float = 0.2, random_state: int = 42):
         """
         Initialize the base model.
@@ -73,10 +80,11 @@ class BaseTradeModel(ABC):
         self.test_metrics: Dict[str, float] = {}
         self.feature_importances: Optional[pd.DataFrame] = None
 
-        # Data pipeline
+        # Data pipeline — target_col берётся из класса (next_return или next_close)
         self.pipeline = DataPipeline(
             test_size=test_size,
-            random_state=random_state
+            random_state=random_state,
+            target_col=self.TARGET_COLUMN,
         )
 
     @abstractmethod
@@ -183,14 +191,26 @@ class BaseTradeModel(ABC):
             scaled_data.y_test, test_preds, prefix="test_"
         )
 
-        # Direction accuracy
-        train_direction = calculate_direction_accuracy(
-            scaled_data.y_train, train_preds
-        )
-        test_direction = calculate_direction_accuracy(
-            scaled_data.y_test, test_preds,
-            scaled_data.current_prices_test.values
-        )
+        # Direction accuracy — считается по-разному в зависимости от таргета.
+        # Для next_return: знак предсказания совпадает со знаком факта (UP/DOWN).
+        # Для next_close:  сравниваем pred vs current_price.
+        if self.TARGET_COLUMN == "next_return":
+            # y_train/y_test уже в % изменений; direction = sign совпадает
+            import numpy as _np
+            train_direction = float(_np.mean(
+                _np.sign(train_preds) == _np.sign(scaled_data.y_train)
+            ) * 100)
+            test_direction = float(_np.mean(
+                _np.sign(test_preds) == _np.sign(scaled_data.y_test)
+            ) * 100)
+        else:
+            train_direction = calculate_direction_accuracy(
+                scaled_data.y_train, train_preds
+            )
+            test_direction = calculate_direction_accuracy(
+                scaled_data.y_test, test_preds,
+                scaled_data.current_prices_test.values
+            )
 
         self.train_metrics['train_direction_accuracy'] = train_direction
         self.test_metrics['test_direction_accuracy'] = test_direction
@@ -227,11 +247,10 @@ class BaseTradeModel(ABC):
         """
         Predict the next price and generate trading signal.
 
-        Args:
-            df: Raw OHLCV data (should include the most recent data point)
-
-        Returns:
-            Dictionary with prediction details
+        Поддерживает оба варианта таргета:
+          - TARGET_COLUMN = 'next_close'  → модель сразу даёт цену
+          - TARGET_COLUMN = 'next_return' → модель даёт % изменения,
+            конвертируем в цену: predicted_price = current * (1 + return/100)
         """
         if not self.is_fitted:
             raise RuntimeError("Model must be fitted before prediction")
@@ -244,10 +263,20 @@ class BaseTradeModel(ABC):
 
         # Scale and predict
         X_scaled = self.scaler.transform(last_row)
-        predicted_price = float(self._predict(X_scaled)[0])
+        raw_pred = float(self._predict(X_scaled)[0])
 
         # Get current price
         current_price = float(df['close'].iloc[-1])
+
+        # Конвертируем raw_pred → predicted_price в зависимости от таргета
+        if self.TARGET_COLUMN == "next_return":
+            # raw_pred — это процент изменения
+            predicted_change_pct = raw_pred
+            predicted_price = current_price * (1 + raw_pred / 100.0)
+        else:
+            predicted_price = raw_pred
+            predicted_change_pct = (predicted_price - current_price) / current_price * 100 \
+                if current_price else 0.0
 
         # Generate trading signal
         signal, expected_change = calculate_trading_signal(
@@ -259,7 +288,9 @@ class BaseTradeModel(ABC):
             'predicted_price': predicted_price,
             'expected_change': expected_change,
             'signal': signal,
-            'model_name': self.MODEL_NAME
+            'model_name': self.MODEL_NAME,
+            'raw_prediction': raw_pred,
+            'target_type': self.TARGET_COLUMN,
         }
 
     def get_results_text(self, df: pd.DataFrame) -> str:

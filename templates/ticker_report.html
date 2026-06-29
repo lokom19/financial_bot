@@ -253,6 +253,13 @@
             <div class="card">
                 <h3>Технический анализ</h3>
                 {% if overview.ta %}
+                <!-- AI-вывод по TA (БЫЧИЙ/МЕДВЕЖИЙ/...) -->
+                <div id="ta-summary" style="margin-bottom: 14px;">
+                    <span class="text-mute" style="font-size:12px;">
+                        <span class="x-spinner"></span> AI-вывод загружается...
+                    </span>
+                </div>{% endif %}
+                {% if overview.ta %}
                 <div class="kvs">
                     {% if overview.ta.rsi is not none %}
                     <span class="k">RSI(14)</span>
@@ -394,7 +401,13 @@
         </style>
 
         <div class="card">
-            <h3>Прогнозы по моделям ({{ overview.models_count }})</h3>
+            <h3>Прогнозы по моделям ({{ overview.models_count }})
+                {% if overview.disabled_count %}
+                <span style="font-size: 12px; font-weight: 400; color: var(--text-soft); text-transform: none; letter-spacing: 0; margin-left: 6px;">
+                    активны: {{ overview.active_count }}, отключены (low live): {{ overview.disabled_count }}
+                </span>
+                {% endif %}
+            </h3>
             <div style="overflow-x: auto;">
                 <table>
                     <thead>
@@ -414,8 +427,10 @@
                         {# Цвет для live-точности: >=55% зелёный, <=45% красный #}
                         {% set live30 = m.recent_hit_rate_30d %}
                         {% set live5 = m.recent_hit_rate_5d %}
-                        <tr>
-                            <td><b>{{ m.model_name }}</b></td>
+                        <tr {% if m.is_disabled %}style="opacity: 0.4; text-decoration: line-through;"{% endif %} title="{% if m.is_disabled %}Модель временно отключена: live точность < 40% за последние 30 прогнозов{% endif %}">
+                            <td><b>{{ m.model_name }}</b>
+                                {% if m.is_disabled %}<span class="x-pill x-pill-danger" style="text-decoration:none; font-size:10px; padding: 1px 6px; margin-left: 4px;">OFF</span>{% endif %}
+                            </td>
                             <td class="sig-{{ (m.signal or 'neutral')|lower }}">{{ m.signal or '—' }}</td>
                             <td class="right" style="font-weight: 600; {% if live30 is not none and live30 >= 55 %}color: var(--success);{% elif live30 is not none and live30 <= 45 %}color: var(--danger);{% endif %}">
                                 {% if live30 is not none %}
@@ -867,11 +882,55 @@
             }
         }
 
-        // При старте грузим главную AI-таблицу + AI-объяснение TA + новости
+        // ============================================================
+        // AI краткий вывод по TA (БЫЧИЙ/МЕДВЕЖИЙ + 1 предложение)
+        // ============================================================
+        async function loadTASummary() {
+            const wrap = document.getElementById('ta-summary');
+            if (!wrap) return;
+            try {
+                const resp = await fetch(`/api/ticker/${encodeURIComponent(TICKER)}/ta-summary`);
+                const data = await resp.json();
+                if (data.error) {
+                    wrap.innerHTML = `<span class="text-mute" style="font-size:12px;">AI-вывод недоступен: ${data.error}</span>`;
+                    return;
+                }
+                const v = (data.verdict || '').toUpperCase();
+                const colors = {
+                    'БЫЧИЙ': '#10b981',
+                    'МЕДВЕЖИЙ': '#ef4444',
+                    'СМЕШАННЫЙ': '#f59e0b',
+                    'НЕЙТРАЛЬНЫЙ': '#64748b',
+                };
+                const icons = {
+                    'БЫЧИЙ': '🐂',
+                    'МЕДВЕЖИЙ': '🐻',
+                    'СМЕШАННЫЙ': '🌗',
+                    'НЕЙТРАЛЬНЫЙ': '⚖️',
+                };
+                const color = colors[v] || '#64748b';
+                const icon = icons[v] || '🤖';
+                wrap.innerHTML = `
+                    <div style="padding: 12px 14px; background: ${color}15; border-left: 3px solid ${color}; border-radius: 6px;">
+                        <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 6px;">
+                            <span style="font-size: 20px;">${icon}</span>
+                            <b style="color: ${color}; font-size: 15px; letter-spacing: 0.5px;">${v}</b>
+                            <span class="text-mute" style="font-size: 11px;">(${data.strength || '—'})</span>
+                        </div>
+                        <div style="font-size: 13px; color: var(--text); line-height: 1.5;">${data.summary || ''}</div>
+                        ${data.key_indicators ? `<div style="font-size: 11px; color: var(--text-soft); margin-top: 6px;">Ключевое: ${data.key_indicators}</div>` : ''}
+                    </div>`;
+            } catch (e) {
+                wrap.innerHTML = `<span class="text-mute" style="font-size:12px;">⚠ ${e.message}</span>`;
+            }
+        }
+
+        // При старте грузим всё AI-связанное
         function startTable() {
             loadAIHistory();
             explainTA(false);
             loadNews();
+            loadTASummary();
         }
         if (document.readyState === 'loading') {
             document.addEventListener('DOMContentLoaded', startTable);

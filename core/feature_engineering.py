@@ -60,12 +60,18 @@ def create_features(
     if FeatureSet.TREND in feature_sets or FeatureSet.EXTENDED in feature_sets:
         df_features = _add_trend_features(df_features)
 
-    # Create target variable
+    # Targets: создаём ОБА варианта.
+    # next_close — абсолютная цена (backward compat)
+    # next_return — относительное изменение в %, обычно лучше для Direction Accuracy
     if include_target:
         df_features['next_close'] = df_features['close'].shift(-1)
+        df_features['next_return'] = (
+            df_features['next_close'] / df_features['close'] - 1
+        ) * 100
 
-    # Handle NaN and infinite values
-    df_features = _handle_missing_values(df_features, exclude_cols=['next_close'] if include_target else [])
+    # Handle NaN and infinite values (защищаем оба таргета от заполнения медианой)
+    target_cols = ['next_close', 'next_return'] if include_target else []
+    df_features = _handle_missing_values(df_features, exclude_cols=target_cols)
 
     return df_features
 

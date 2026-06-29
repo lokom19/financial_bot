@@ -116,8 +116,13 @@ class DataPipeline:
         y = df_valid[self.target_col]
         current_prices = df_valid['close']
 
-        # Determine feature columns (everything except metadata and target)
-        exclude_cols = [self.timestamp_col, self.target_col, 'volume', 'figi']
+        # Determine feature columns (everything except metadata and target).
+        # Исключаем ОБА таргета (next_close + next_return) — даже тот что не
+        # выбран, не должен попасть в фичи, иначе leakage.
+        exclude_cols = [
+            self.timestamp_col, self.target_col, 'volume', 'figi',
+            'next_close', 'next_return',
+        ]
         if 'volume_log' in df_valid.columns:
             # If we have volume_log, exclude raw volume
             exclude_cols.append('volume')
