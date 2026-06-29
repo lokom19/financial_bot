@@ -768,8 +768,9 @@
             const fmt = (v) => v === null || v === undefined ? '—' : v.toFixed(2);
 
             let html = `<table class="x-table"><thead><tr>
-                <th>Дата данных</th>
-                <th>Прогноз на</th>
+                <th title="Когда был сделан прогон обучения">Прогон</th>
+                <th title="Последняя свеча в данных, на которых обучались модели">Данные на</th>
+                <th title="На какой торговый день делается прогноз">Прогноз на</th>
                 <th class="center">Вердикт</th>
                 <th class="center">Уверенность</th>
                 <th class="right">Вход</th>
@@ -788,7 +789,18 @@
                     ? `<span class="diff-up">${high.toFixed(2)}</span> <span class="text-mute">/</span> <span class="diff-down">${low.toFixed(2)}</span>`
                     : '<span class="text-mute">—</span>';
 
+                // Timestamp когда прогон запустился (timestamp поля в ticker_reports)
+                // Формат: YYYY-MM-DD HH:MM, компактно
+                let runStr = '—';
+                if (it.timestamp) {
+                    const d = new Date(it.timestamp);
+                    const pad = n => String(n).padStart(2, '0');
+                    runStr = `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())} `
+                           + `${pad(d.getHours())}:${pad(d.getMinutes())}`;
+                }
+
                 html += `<tr>
+                    <td><span class="text-mute" style="font-size: 12px; font-variant-numeric: tabular-nums;">${runStr}</span></td>
                     <td><span class="text-mute">${it.data_date || '—'}</span></td>
                     <td><b>${it.prediction_date || '—'}</b></td>
                     <td class="center">${verdictBadge(it.verdict)}</td>
