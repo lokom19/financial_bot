@@ -1,6 +1,7 @@
 """
 Расчёт технических индикаторов по последним свечам тикера.
 """
+import os
 import logging
 from datetime import datetime, timezone, timedelta
 
@@ -24,6 +25,16 @@ def _is_today_candle_complete() -> bool:
     return now.hour >= _MARKET_CLOSE_HOUR_MSK
 
 
+def _use_partial_candle() -> bool:
+    """
+    Использовать ли сегодняшнюю НЕЗАКРЫТУЮ свечу.
+    По умолчанию false — безопаснее, прогноз стабилен.
+    Если true — фронт получит свежий прогноз даже во время торгов,
+    но "close" не финальный и модель работает на неполных данных.
+    """
+    return os.getenv("USE_PARTIAL_CANDLE", "false").lower() == "true"
+
+
 def compute_ta_indicators(engine, figi: str, n_candles: int = 100) -> dict:
     """
     Считает RSI, MACD, Stochastic, SMA по последним свечам тикера
@@ -44,18 +55,28 @@ def compute_ta_indicators(engine, figi: str, n_candles: int = 100) -> dict:
             return {}
         df = df.sort_values("timestamp").reset_index(drop=True)
 
-        # Защита от "недоторгованной" сегодняшней свечи
+        # Защита от "недоторгованной" сегодняшней свечи.
+        # Если рынок открыт И в БД есть свеча за сегодня — она НЕПОЛНАЯ.
+        # По умолчанию отбрасываем (USE_PARTIAL_CANDLE=false).
         today_msk = datetime.now(_MSK).date()
         if not _is_today_candle_complete():
             last_date = pd.to_datetime(df['timestamp'].iloc[-1]).date()
             if last_date >= today_msk:
-                logger.info(
-                    "Отбрасываю свечу %s — день не закрыт (текущее время МСК %s)",
-                    last_date, datetime.now(_MSK).strftime("%H:%M"),
-                )
-                df = df[pd.to_datetime(df['timestamp']).dt.date < today_msk].reset_index(drop=True)
-                if df.empty or len(df) < 30:
-                    return {}
+                if _use_partial_candle():
+                    logger.info(
+                        "USE_PARTIAL_CANDLE=true: использую неполную свечу %s "
+                        "(время МСК %s, close ещё не финальный)",
+                        last_date, datetime.now(_MSK).strftime("%H:%M"),
+                    )
+                else:
+                    logger.info(
+                        "Отбрасываю свечу %s — день не закрыт (МСК %s). "
+                        "Чтобы включить — установи USE_PARTIAL_CANDLE=true",
+                        last_date, datetime.now(_MSK).strftime("%H:%M"),
+                    )
+                    df = df[pd.to_datetime(df['timestamp']).dt.date < today_msk].reset_index(drop=True)
+                    if df.empty or len(df) < 30:
+                        return {}
 
         # RSI(14)
         delta = df["close"].diff()

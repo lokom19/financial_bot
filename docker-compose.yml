@@ -72,6 +72,7 @@ services:
       - SIGNAL_NEUTRAL_THRESHOLD=${SIGNAL_NEUTRAL_THRESHOLD:-0.05}
       - MODEL_DISABLE_MIN_SAMPLES=${MODEL_DISABLE_MIN_SAMPLES:-10}
       - MODEL_DISABLE_HIT_RATE=${MODEL_DISABLE_HIT_RATE:-40}
+      - USE_PARTIAL_CANDLE=${USE_PARTIAL_CANDLE:-false}
     volumes:
       - ./templates:/app/templates
       - ./static:/app/static
@@ -123,6 +124,7 @@ services:
       - SIGNAL_NEUTRAL_THRESHOLD=${SIGNAL_NEUTRAL_THRESHOLD:-0.05}
       - MODEL_DISABLE_MIN_SAMPLES=${MODEL_DISABLE_MIN_SAMPLES:-10}
       - MODEL_DISABLE_HIT_RATE=${MODEL_DISABLE_HIT_RATE:-40}
+      - USE_PARTIAL_CANDLE=${USE_PARTIAL_CANDLE:-false}
     depends_on:
       postgres:
         condition: service_healthy
