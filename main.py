@@ -39,6 +39,7 @@ from services.llm_service import (
 from services.ta_indicators import compute_ta_indicators
 from services.news_service import fetch_news_for_ticker
 from services.performance_tracker import compute_recent_hit_rates
+from services.portfolio_simulator import simulate as simulate_portfolio
 
 load_dotenv()
 logging.basicConfig(level=logging.INFO,
@@ -367,6 +368,44 @@ def _load_ticker_overview(db: Session, ticker_or_figi: str) -> dict:
             "neutral": float(_os.getenv("SIGNAL_NEUTRAL_THRESHOLD", "0.05")),
         },
     }
+
+
+@app.get("/api/portfolio", tags=["Stats"])
+@limiter.limit("60/hour")
+async def portfolio_simulation(request: Request,
+                                initial: float = 100_000.0,
+                                commission: float = 0.05,
+                                only_closed: bool = True):
+    """
+    Симулирует торговлю по AI-вердиктам и возвращает equity curve + сделки.
+    Параметры:
+      initial    — стартовый депозит (RUB), default 100 000
+      commission — комиссия за сделку в %, default 0.05
+      only_closed — учитывать только закрытые позиции, default true
+    """
+    result = simulate_portfolio(
+        engine,
+        initial_capital=initial,
+        commission_pct=commission,
+        only_closed=only_closed,
+    )
+    return result
+
+
+@app.get("/portfolio", response_class=HTMLResponse, tags=["Pages"])
+async def portfolio_page(request: Request):
+    """Страница калькулятора портфеля (требует авторизации)."""
+    current_user, redirect = _require_login(request)
+    if redirect:
+        return redirect
+    return templates.TemplateResponse(
+        request=request,
+        name="portfolio.html",
+        context={
+            "current_user": current_user,
+            "streamlit_url": STREAMLIT_URL,
+        },
+    )
 
 
 @app.get("/ticker/{ticker}", response_class=HTMLResponse, tags=["Pages"])

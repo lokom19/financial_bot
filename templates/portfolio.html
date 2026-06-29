@@ -1,0 +1,434 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Калькулятор портфеля — Trading Signals</title>
+    <link rel="stylesheet" href="/static/styles.css?v=4">
+    <style>
+        .page { max-width: 1180px; margin: 28px auto; padding: 0 24px; }
+        .hdr { display: flex; align-items: baseline; gap: 16px; margin-bottom: 24px; flex-wrap: wrap; }
+        .hdr h1 { margin: 0; font-size: 32px; color: var(--text); letter-spacing: -0.025em; }
+        .hdr .sub { color: var(--text-soft); font-size: 14px; }
+
+        .controls {
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: 14px;
+            padding: 20px 22px;
+            margin-bottom: 22px;
+            display: flex;
+            gap: 16px;
+            align-items: end;
+            flex-wrap: wrap;
+        }
+        .controls label {
+            display: flex; flex-direction: column;
+            font-size: 12px;
+            color: var(--text-muted);
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.04em;
+            gap: 6px;
+        }
+        .controls input[type=number] {
+            padding: 10px 14px;
+            font-size: 15px;
+            font-weight: 600;
+            border: 1.5px solid var(--border);
+            border-radius: 10px;
+            width: 160px;
+            font-variant-numeric: tabular-nums;
+        }
+        .controls input:focus { outline: none; border-color: var(--primary); }
+        .controls .ck-line {
+            display: flex; align-items: center; gap: 6px;
+            font-size: 13px; color: var(--text); text-transform: none;
+            letter-spacing: 0; font-weight: 500;
+        }
+        .controls button {
+            padding: 11px 22px;
+            background: var(--primary);
+            color: #fff;
+            border: none;
+            border-radius: 10px;
+            font-weight: 700;
+            font-size: 14px;
+            cursor: pointer;
+            transition: all 0.15s;
+        }
+        .controls button:hover { background: var(--primary-hover); }
+        .controls button:disabled { opacity: 0.5; cursor: not-allowed; }
+
+        .summary {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+            gap: 1px;
+            padding: 1px;
+            background: var(--border);
+            border-radius: 14px;
+            overflow: hidden;
+            margin-bottom: 22px;
+        }
+        .summ-item {
+            background: var(--surface);
+            padding: 18px 20px;
+            display: flex; flex-direction: column; gap: 6px;
+        }
+        .summ-item .lbl {
+            font-size: 11px;
+            color: var(--text-muted);
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            font-weight: 600;
+        }
+        .summ-item .val {
+            font-size: 26px;
+            font-weight: 700;
+            letter-spacing: -0.02em;
+            font-variant-numeric: tabular-nums;
+        }
+        .val.green { color: var(--success); }
+        .val.red { color: var(--danger); }
+        .val.amber { color: var(--warning); }
+        .summ-item .sub { font-size: 11px; color: var(--text-soft); }
+
+        .equity-chart {
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: 14px;
+            padding: 22px;
+            margin-bottom: 22px;
+        }
+        .equity-chart h3 {
+            margin: 0 0 12px;
+            font-size: 12px;
+            color: var(--text-muted);
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            font-weight: 700;
+        }
+        #equity-canvas { width: 100%; height: 280px; }
+
+        .trades-card {
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: 14px;
+            padding: 22px;
+            margin-bottom: 22px;
+        }
+        .trades-card h3 {
+            margin: 0 0 12px;
+            font-size: 12px;
+            color: var(--text-muted);
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            font-weight: 700;
+        }
+
+        .verdict-pill {
+            display: inline-block;
+            padding: 2px 8px;
+            border-radius: 999px;
+            font-size: 11px;
+            font-weight: 700;
+        }
+        .verdict-buy { background: var(--success-bg); color: var(--success-text); }
+        .verdict-sell { background: var(--danger-bg); color: var(--danger-text); }
+
+        .exit-reason {
+            font-size: 10px;
+            padding: 1px 6px;
+            border-radius: 4px;
+            color: var(--text-muted);
+            background: var(--surface-alt);
+        }
+    </style>
+</head>
+<body>
+    <!-- Top bar -->
+    <div class="tb-top">
+        <div class="tb-brand">
+            <a href="/">📈 Trading Signals</a>
+            <span class="slash">/</span>
+            <span class="ticker-chip">Калькулятор портфеля</span>
+        </div>
+        <div class="tb-user">
+            <a href="{{ streamlit_url }}" target="_blank" rel="noopener">📊 Дашборд</a>
+            {% if current_user %}
+            <div class="user-chip">
+                <div class="tb-avatar">{{ current_user.username[0].upper() }}</div>
+                <a href="/auth/profile">{{ current_user.username }}</a>
+            </div>
+            <a href="/auth/logout">Выйти</a>
+            {% else %}
+            <a href="/auth/login" class="tb-btn">Войти</a>
+            {% endif %}
+        </div>
+    </div>
+
+    <div class="page">
+        <div class="hdr">
+            <h1>💰 Калькулятор портфеля</h1>
+            <span class="sub">Что было бы с деньгами, если бы следовать AI-вердиктам</span>
+        </div>
+
+        <div class="controls">
+            <label>
+                Стартовый депозит, ₽
+                <input type="number" id="initial" value="100000" min="1000" step="10000">
+            </label>
+            <label>
+                Комиссия за сделку, %
+                <input type="number" id="commission" value="0.05" min="0" step="0.01">
+            </label>
+            <label class="ck-line">
+                <input type="checkbox" id="only-closed" checked>
+                Только закрытые сделки
+            </label>
+            <button id="simulate-btn" onclick="runSimulation()">Пересчитать</button>
+        </div>
+
+        <div id="summary-wrap"></div>
+        <div class="equity-chart">
+            <h3>📈 Кривая капитала</h3>
+            <canvas id="equity-canvas"></canvas>
+            <div id="empty-state" style="display:none; text-align:center; padding: 40px 0; color: var(--text-muted);">
+                Нет закрытых сделок. Симулятор покажет результаты после того как
+                накопится несколько прогнозов с известным фактом.
+            </div>
+        </div>
+        <div id="by-ticker-wrap"></div>
+        <div class="trades-card">
+            <h3>📋 Сделки</h3>
+            <div id="trades-wrap" style="overflow-x: auto;">
+                <div style="color: var(--text-muted); padding: 20px 0;">Загрузка…</div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+    const fmtRub = (v) => {
+        if (v === null || v === undefined) return '—';
+        const sign = v >= 0 ? '+' : '';
+        return sign + v.toLocaleString('ru-RU', {minimumFractionDigits: 2, maximumFractionDigits: 2}) + ' ₽';
+    };
+    const fmtPct = (v) => {
+        if (v === null || v === undefined) return '—';
+        const sign = v >= 0 ? '+' : '';
+        return sign + v.toFixed(2) + '%';
+    };
+
+    async function runSimulation() {
+        const btn = document.getElementById('simulate-btn');
+        btn.disabled = true;
+        btn.textContent = '...';
+
+        const initial = parseFloat(document.getElementById('initial').value) || 100000;
+        const commission = parseFloat(document.getElementById('commission').value) || 0;
+        const onlyClosed = document.getElementById('only-closed').checked;
+        try {
+            const resp = await fetch(`/api/portfolio?initial=${initial}&commission=${commission}&only_closed=${onlyClosed}`);
+            const data = await resp.json();
+            renderSummary(data.summary);
+            renderEquity(data.equity_curve, data.summary);
+            renderByTicker(data.by_ticker);
+            renderTrades(data.trades);
+        } catch (e) {
+            alert('Ошибка: ' + e.message);
+        } finally {
+            btn.disabled = false;
+            btn.textContent = 'Пересчитать';
+        }
+    }
+
+    function renderSummary(s) {
+        const wrap = document.getElementById('summary-wrap');
+        const retClass = s.total_return_pct > 0 ? 'green' : (s.total_return_pct < 0 ? 'red' : '');
+        const finalClass = s.final_equity > s.initial_capital ? 'green' : (s.final_equity < s.initial_capital ? 'red' : '');
+        const wrClass = s.win_rate_pct === null ? '' :
+            (s.win_rate_pct >= 55 ? 'green' : (s.win_rate_pct <= 45 ? 'red' : 'amber'));
+        wrap.innerHTML = `
+        <div class="summary">
+            <div class="summ-item">
+                <span class="lbl">Стартовый депозит</span>
+                <span class="val">${s.initial_capital.toLocaleString('ru-RU')} ₽</span>
+            </div>
+            <div class="summ-item">
+                <span class="lbl">Итоговый капитал</span>
+                <span class="val ${finalClass}">${s.final_equity.toLocaleString('ru-RU')} ₽</span>
+                <span class="sub">${fmtRub(s.final_equity - s.initial_capital)} от старта</span>
+            </div>
+            <div class="summ-item">
+                <span class="lbl">Доходность</span>
+                <span class="val ${retClass}">${fmtPct(s.total_return_pct)}</span>
+            </div>
+            <div class="summ-item">
+                <span class="lbl">Сделок</span>
+                <span class="val">${s.trades}</span>
+                <span class="sub">за ${s.days_simulated} торг. дней</span>
+            </div>
+            <div class="summ-item">
+                <span class="lbl">Win Rate</span>
+                <span class="val ${wrClass}">${s.win_rate_pct === null ? '—' : s.win_rate_pct + '%'}</span>
+                <span class="sub">прибыльных: ${s.winning_trades}/${s.trades}</span>
+            </div>
+            <div class="summ-item">
+                <span class="lbl">Лучшая сделка</span>
+                <span class="val green">${fmtPct(s.best_trade_pct)}</span>
+            </div>
+            <div class="summ-item">
+                <span class="lbl">Худшая сделка</span>
+                <span class="val red">${fmtPct(s.worst_trade_pct)}</span>
+            </div>
+        </div>`;
+    }
+
+    function renderEquity(curve, s) {
+        const canvas = document.getElementById('equity-canvas');
+        const empty = document.getElementById('empty-state');
+        if (!curve || curve.length === 0) {
+            canvas.style.display = 'none';
+            empty.style.display = 'block';
+            return;
+        }
+        canvas.style.display = 'block';
+        empty.style.display = 'none';
+
+        const ctx = canvas.getContext('2d');
+        const W = canvas.width = canvas.offsetWidth * window.devicePixelRatio;
+        const H = canvas.height = canvas.offsetHeight * window.devicePixelRatio;
+        ctx.scale(window.devicePixelRatio, window.devicePixelRatio);
+
+        const w = canvas.offsetWidth, h = canvas.offsetHeight;
+        ctx.clearRect(0, 0, w, h);
+
+        const initial = s.initial_capital;
+        const equities = curve.map(p => p.equity);
+        const minE = Math.min(initial, ...equities);
+        const maxE = Math.max(initial, ...equities);
+        const padding = (maxE - minE) * 0.1 || 100;
+        const yMin = minE - padding;
+        const yMax = maxE + padding;
+
+        const padX = 40, padY = 20;
+        const plotW = w - padX * 2, plotH = h - padY * 2;
+
+        // Baseline (initial deposit)
+        const baselineY = padY + plotH * (1 - (initial - yMin) / (yMax - yMin));
+        ctx.strokeStyle = '#cbd5e1';
+        ctx.setLineDash([4, 4]);
+        ctx.beginPath();
+        ctx.moveTo(padX, baselineY);
+        ctx.lineTo(w - padX, baselineY);
+        ctx.stroke();
+        ctx.setLineDash([]);
+        ctx.fillStyle = '#94a3b8';
+        ctx.font = '11px sans-serif';
+        ctx.fillText('Начальный депозит', padX + 4, baselineY - 4);
+
+        // Equity curve
+        const finalEq = equities[equities.length - 1];
+        const color = finalEq >= initial ? '#10b981' : '#ef4444';
+        ctx.strokeStyle = color;
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        curve.forEach((p, i) => {
+            const x = padX + (i / Math.max(1, curve.length - 1)) * plotW;
+            const y = padY + plotH * (1 - (p.equity - yMin) / (yMax - yMin));
+            if (i === 0) ctx.moveTo(x, y);
+            else ctx.lineTo(x, y);
+        });
+        ctx.stroke();
+
+        // Fill area
+        ctx.lineTo(w - padX, h - padY);
+        ctx.lineTo(padX, h - padY);
+        ctx.closePath();
+        ctx.fillStyle = color + '15';
+        ctx.fill();
+
+        // Labels first/last dates
+        ctx.fillStyle = '#64748b';
+        ctx.font = '11px sans-serif';
+        ctx.fillText(curve[0].date, padX, h - 4);
+        ctx.textAlign = 'right';
+        ctx.fillText(curve[curve.length - 1].date, w - padX, h - 4);
+        ctx.textAlign = 'left';
+    }
+
+    function renderByTicker(byTicker) {
+        const wrap = document.getElementById('by-ticker-wrap');
+        if (!byTicker || Object.keys(byTicker).length === 0) {
+            wrap.innerHTML = '';
+            return;
+        }
+        let html = '<div class="trades-card"><h3>📊 По тикерам</h3><table class="x-table"><thead><tr>'
+            + '<th>Тикер</th><th class="right">Сделок</th><th class="right">Win Rate</th>'
+            + '<th class="right">Средняя доходность</th><th class="right">P&L, ₽</th></tr></thead><tbody>';
+        for (const [ticker, st] of Object.entries(byTicker)) {
+            const wrCls = st.win_rate_pct >= 55 ? 'text-success' : (st.win_rate_pct <= 45 ? 'text-danger' : '');
+            const pnlCls = st.pnl_rub > 0 ? 'text-success' : (st.pnl_rub < 0 ? 'text-danger' : '');
+            html += `<tr>
+                <td><b>${ticker}</b></td>
+                <td class="right">${st.trades}</td>
+                <td class="right ${wrCls}">${st.win_rate_pct === null ? '—' : st.win_rate_pct + '%'}</td>
+                <td class="right ${st.avg_return_pct >= 0 ? 'text-success' : 'text-danger'}">${fmtPct(st.avg_return_pct)}</td>
+                <td class="right ${pnlCls}">${fmtRub(st.pnl_rub)}</td>
+            </tr>`;
+        }
+        html += '</tbody></table></div>';
+        wrap.innerHTML = html;
+    }
+
+    function renderTrades(trades) {
+        const wrap = document.getElementById('trades-wrap');
+        if (!trades || trades.length === 0) {
+            wrap.innerHTML = '<div style="color: var(--text-muted); padding: 20px 0;">Сделок пока нет</div>';
+            return;
+        }
+        let html = '<table class="x-table"><thead><tr>'
+            + '<th>Дата</th><th>Тикер</th><th>Вердикт</th>'
+            + '<th class="right">Вход</th><th class="right">Выход</th><th>Причина</th>'
+            + '<th class="right">Доход %</th><th class="right">P&L, ₽</th>'
+            + '<th class="right">Капитал в сделке</th></tr></thead><tbody>';
+        // показываем последние 100 сделок в обратном порядке (свежие сверху)
+        for (const t of trades.slice().reverse().slice(0, 100)) {
+            const vCls = t.verdict === 'BUY' ? 'verdict-buy' : 'verdict-sell';
+            const pnlCls = t.pnl_rub > 0 ? 'text-success' : (t.pnl_rub < 0 ? 'text-danger' : '');
+            const exitLabels = {
+                'target': '🎯 цель',
+                'stop': '🛑 стоп',
+                'close': 'close',
+            };
+            html += `<tr>
+                <td><span class="text-mute">${t.date}</span></td>
+                <td><b>${t.ticker}</b></td>
+                <td><span class="verdict-pill ${vCls}">${t.verdict}</span></td>
+                <td class="right">${t.entry_price.toFixed(2)}</td>
+                <td class="right">${t.exit_price.toFixed(2)}</td>
+                <td><span class="exit-reason">${exitLabels[t.exit_reason] || t.exit_reason}</span></td>
+                <td class="right ${t.net_return_pct >= 0 ? 'text-success' : 'text-danger'}">${fmtPct(t.net_return_pct)}</td>
+                <td class="right ${pnlCls}">${fmtRub(t.pnl_rub)}</td>
+                <td class="right text-mute">${t.capital_at_trade.toLocaleString('ru-RU', {maximumFractionDigits:0})} ₽</td>
+            </tr>`;
+        }
+        html += '</tbody></table>';
+        if (trades.length > 100) {
+            html += `<div style="text-align: center; margin-top: 12px; color: var(--text-muted); font-size: 13px;">
+                Показаны последние 100 из ${trades.length} сделок
+            </div>`;
+        }
+        wrap.innerHTML = html;
+    }
+
+    // Стартуем сразу
+    runSimulation();
+    window.addEventListener('resize', () => {
+        // Перерисуем equity на ресайз
+        fetch(`/api/portfolio?initial=${document.getElementById('initial').value || 100000}`)
+            .then(r => r.json()).then(d => renderEquity(d.equity_curve, d.summary));
+    });
+    </script>
+</body>
+</html>
