@@ -2,17 +2,36 @@
 Расчёт технических индикаторов по последним свечам тикера.
 """
 import logging
+from datetime import datetime, timezone, timedelta
+
 import numpy as np
 import pandas as pd
 from sqlalchemy import text
 
 logger = logging.getLogger(__name__)
 
+# Московский TZ + час, когда биржа гарантированно закрылась (вечерка ~23:50)
+_MSK = timezone(timedelta(hours=3))
+_MARKET_CLOSE_HOUR_MSK = 20  # после 20:00 МСК дневная свеча считается закрытой
+
+
+def _is_today_candle_complete() -> bool:
+    """Закрылись ли уже основные торги по Москве."""
+    now = datetime.now(_MSK)
+    # Сб(5) и Вс(6) — биржа не работает, считаем что предыдущий день закрыт
+    if now.weekday() >= 5:
+        return True
+    return now.hour >= _MARKET_CLOSE_HOUR_MSK
+
 
 def compute_ta_indicators(engine, figi: str, n_candles: int = 100) -> dict:
     """
     Считает RSI, MACD, Stochastic, SMA по последним свечам тикера
     из таблицы all_dfs.<figi>. Возвращает значения на последней дате.
+
+    Важно: если самая последняя свеча в БД — за СЕГОДНЯ, а рынок ещё
+    открыт (до 20:00 МСК) — эта свеча НЕПОЛНАЯ и её close не финальный.
+    Отбрасываем её и работаем с предыдущим полным днём.
     """
     try:
         q = text(
@@ -24,6 +43,19 @@ def compute_ta_indicators(engine, figi: str, n_candles: int = 100) -> dict:
         if df.empty or len(df) < 30:
             return {}
         df = df.sort_values("timestamp").reset_index(drop=True)
+
+        # Защита от "недоторгованной" сегодняшней свечи
+        today_msk = datetime.now(_MSK).date()
+        if not _is_today_candle_complete():
+            last_date = pd.to_datetime(df['timestamp'].iloc[-1]).date()
+            if last_date >= today_msk:
+                logger.info(
+                    "Отбрасываю свечу %s — день не закрыт (текущее время МСК %s)",
+                    last_date, datetime.now(_MSK).strftime("%H:%M"),
+                )
+                df = df[pd.to_datetime(df['timestamp']).dt.date < today_msk].reset_index(drop=True)
+                if df.empty or len(df) < 30:
+                    return {}
 
         # RSI(14)
         delta = df["close"].diff()

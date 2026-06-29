@@ -182,9 +182,10 @@
         {% if overview.data_date or overview.prediction_date %}
         <div style="display: flex; gap: 14px; margin-bottom: 20px; flex-wrap: wrap;">
             {% if overview.data_date %}
-            <div style="background: var(--surface); border: 1px solid var(--border); padding: 8px 14px; border-radius: 10px; font-size: 13px;">
+            <div style="background: var(--surface); border: 1px solid var(--border); padding: 8px 14px; border-radius: 10px; font-size: 13px;" title="Последняя закрытая (полная) свеча в БД. Сегодняшняя свеча используется только после закрытия торгов в 19:00 МСК">
                 <span style="color: var(--text-muted); margin-right: 8px;">📅 Данные на:</span>
                 <b style="color: var(--text); font-variant-numeric: tabular-nums;">{{ overview.data_date }}</b>
+                <span style="color: var(--text-soft); font-size: 11px; margin-left: 4px;">(последняя закрытая свеча)</span>
             </div>
             {% endif %}
             {% if overview.prediction_date %}
