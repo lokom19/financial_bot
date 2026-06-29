@@ -107,8 +107,8 @@ def calculate_direction_accuracy(
 def calculate_trading_signal(
     current_price: float,
     predicted_price: float,
-    buy_threshold: float = 0.5,
-    sell_threshold: float = -0.5
+    buy_threshold: float = None,
+    sell_threshold: float = None,
 ) -> Tuple[str, float]:
     """
     Determine trading signal based on predicted price change.
@@ -126,13 +126,21 @@ def calculate_trading_signal(
     if current_price == 0:
         return "NEUTRAL", 0.0
 
+    # Дефолтные пороги через env (можно регулировать без правок кода)
+    import os
+    if buy_threshold is None:
+        buy_threshold = float(os.getenv("SIGNAL_BUY_THRESHOLD", "0.2"))
+    if sell_threshold is None:
+        sell_threshold = float(os.getenv("SIGNAL_SELL_THRESHOLD", "-0.2"))
+    neutral_threshold = float(os.getenv("SIGNAL_NEUTRAL_THRESHOLD", "0.05"))
+
     expected_change = ((predicted_price - current_price) / current_price) * 100
 
     if expected_change >= buy_threshold:
         signal = "BUY"
     elif expected_change <= sell_threshold:
         signal = "SELL"
-    elif abs(expected_change) < 0.1:
+    elif abs(expected_change) < neutral_threshold:
         signal = "NEUTRAL"
     else:
         signal = "HOLD"

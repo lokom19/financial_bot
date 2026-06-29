@@ -219,13 +219,17 @@
 
                     <!-- Structured metrics grid -->
                     <div class="metrics-grid">
-                        <div class="metric-box {% if file.r_squared and file.r_squared >= 0.7 %}good{% elif file.r_squared and file.r_squared >= 0.5 %}mid{% elif file.r_squared %}bad{% endif %}">
-                            <div class="mval">{{ "%.3f"|format(file.r_squared) if file.r_squared is not none else "—" }}</div>
-                            <div class="mlabel">R²</div>
-                        </div>
-                        <div class="metric-box {% if file.accuracy and file.accuracy >= 60 %}good{% elif file.accuracy and file.accuracy >= 55 %}mid{% elif file.accuracy %}bad{% endif %}">
+                        {# Direction Accuracy — главная метрика качества для returns #}
+                        <div class="metric-box {% if file.accuracy and file.accuracy >= 60 %}good{% elif file.accuracy and file.accuracy >= 55 %}mid{% elif file.accuracy %}bad{% endif %}"
+                             title="Direction Accuracy — главная метрика. % правильно угаданных направлений (UP/DOWN). Выше 55% — модель полезна.">
                             <div class="mval">{{ "%.1f"|format(file.accuracy) + "%" if file.accuracy is not none else "—" }}</div>
-                            <div class="mlabel">Direction</div>
+                            <div class="mlabel">⭐ Direction</div>
+                        </div>
+                        {# R² — для returns < 0 НОРМАЛЬНО (rendomизация шума), оранжевый = вспомогательная #}
+                        <div class="metric-box {% if file.r_squared and file.r_squared >= 0.1 %}good{% elif file.r_squared and file.r_squared >= 0 %}mid{% endif %}"
+                             title="R² для returns (доходностей) часто < 0 — это нормально. Реальную полезность модели смотри по Direction.">
+                            <div class="mval" style="font-size: 14px;">{{ "%.3f"|format(file.r_squared) if file.r_squared is not none else "—" }}</div>
+                            <div class="mlabel" style="font-size: 10px;">R² <small>(returns)</small></div>
                         </div>
                         <div class="metric-box {% if file.expected_change and file.expected_change > 0 %}good{% elif file.expected_change and file.expected_change < 0 %}bad{% endif %}">
                             <div class="mval">{{ "%+.2f"|format(file.expected_change) + "%" if file.expected_change is not none else "—" }}</div>
