@@ -184,21 +184,54 @@ class LLMAnalyzeRequest(BaseModel):
     r2_avg: float = 0.0
     direction_accuracy_avg: float = 50.0
     models_data: List[dict] = []
+    # ID конкретной записи в model_results — нужен для кеширования вердикта.
+    # Без него повторные клики будут жечь токены Groq.
+    result_id: Optional[int] = None
+    force: bool = False
 
 
 @app.post("/api/llm/analyze", tags=["LLM"])
 @limiter.limit("30/hour")
 async def llm_analyze(request: Request, payload: LLMAnalyzeRequest):
-    """Query LLM to analyze a trading signal."""
-    result = analyze_signal(
-        ticker=payload.ticker,
-        current_price=payload.current_price,
-        trading_signal=payload.trading_signal,
-        models_data=payload.models_data,
-        r2_avg=payload.r2_avg,
-        direction_accuracy_avg=payload.direction_accuracy_avg,
-    )
-    return result
+    """
+    Per-model LLM-вердикт. Кешируется в model_results.llm_signal/llm_reasoning —
+    повторные нажатия кнопки возвращают сохранённый ответ, не вызывая Groq.
+    """
+    from datetime import datetime as _dt
+    db = SyncSessionLocal()
+    try:
+        row = None
+        if payload.result_id:
+            row = db.query(ModelResult).filter(ModelResult.id == payload.result_id).first()
+
+        if row and row.llm_signal and not payload.force:
+            return {
+                "answer": row.llm_signal,
+                "reasoning": row.llm_reasoning or "",
+                "explanation": row.llm_reasoning or "",
+                "cached": True,
+                "processed_at": row.llm_processed_at.isoformat() if row.llm_processed_at else None,
+            }
+
+        result = analyze_signal(
+            ticker=payload.ticker,
+            current_price=payload.current_price,
+            trading_signal=payload.trading_signal,
+            models_data=payload.models_data,
+            r2_avg=payload.r2_avg,
+            direction_accuracy_avg=payload.direction_accuracy_avg,
+        )
+
+        # Сохраняем в БД чтобы повторный клик не жёг токены
+        if row and result.get("answer") and result["answer"] != "UNAVAILABLE":
+            row.llm_signal = result["answer"]
+            row.llm_reasoning = result.get("reasoning") or result.get("explanation") or ""
+            row.llm_processed_at = _dt.utcnow()
+            db.commit()
+
+        return {**result, "cached": False}
+    finally:
+        db.close()
 
 
 # ============================================================
@@ -1157,6 +1190,7 @@ async def view_model(request: Request,
                     prediction_date_str = (d + _td(days=delta)).isoformat()
 
                 files_data.append({
+                    'id': result.id,
                     'name': result.db_name,
                     'content': content,
                     'signal': file_signal,

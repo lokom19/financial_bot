@@ -297,8 +297,8 @@
                             </div>
                             {% endif %}
                         {% else %}
-                            <button class="btn-llm" onclick="analyzeLLM({{ loop.index }}, '{{ file.ticker }}', {{ file.current_price or 0 }}, '{{ file.signal }}', {{ file.r_squared or 0 }}, {{ file.accuracy or 50 }})">
-                                Спросить LLM
+                            <button class="btn-llm" onclick="analyzeLLM({{ loop.index }}, {{ file.id }}, '{{ file.ticker }}', {{ file.current_price or 0 }}, '{{ file.signal }}', {{ file.r_squared or 0 }}, {{ file.accuracy or 50 }})">
+                                🤖 Получить вердикт
                             </button>
                             <span class="llm-loading" id="llm-loading-{{ loop.index }}">Анализирую...</span>
                             <span class="llm-result" id="llm-result-{{ loop.index }}"></span>
@@ -326,7 +326,7 @@
         document.getElementById('time-info').textContent =
             'Обновлено: ' + new Date().toLocaleString('ru-RU');
 
-        async function analyzeLLM(idx, ticker, price, signal, r2, direction) {
+        async function analyzeLLM(idx, resultId, ticker, price, signal, r2, direction) {
             const btn = document.querySelector(`#llm-block-${idx} .btn-llm`);
             const loading = document.getElementById(`llm-loading-${idx}`);
             const result = document.getElementById(`llm-result-${idx}`);
@@ -342,12 +342,18 @@
                     method: 'POST',
                     headers: {'Content-Type': 'application/json'},
                     body: JSON.stringify({
+                        result_id: resultId,
                         ticker: ticker,
                         current_price: price,
                         trading_signal: signal,
                         r2_avg: r2,
                         direction_accuracy_avg: direction,
-                        models_data: []
+                        models_data: [{
+                            model_name: '{{ model_name }}',
+                            signal: signal,
+                            r2: r2,
+                            direction_accuracy: direction
+                        }]
                     })
                 });
                 const data = await resp.json();
