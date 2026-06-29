@@ -62,63 +62,11 @@ R² игнорируй — для returns близка к 0, не показат
 
 
 _LAST_GROQ_ERROR: Optional[str] = None
-_LAST_MISTRAL_ERROR: Optional[str] = None
 _LAST_OLLAMA_ERROR: Optional[str] = None
 
 
 def get_last_errors() -> dict:
-    return {
-        "groq": _LAST_GROQ_ERROR,
-        "mistral": _LAST_MISTRAL_ERROR,
-        "ollama": _LAST_OLLAMA_ERROR,
-    }
-
-
-def _get_mistral_response(user_message: str, system_prompt: Optional[str] = None,
-                          max_tokens: int = 250) -> Optional[str]:
-    """
-    Mistral AI (https://mistral.ai) — бесплатный tier с щедрыми лимитами.
-    Использует OpenAI-compatible API.
-
-    Регистрация → https://console.mistral.ai/api-keys/
-    Добавь MISTRAL_API_KEY в .env. По умолчанию модель `mistral-small-latest`
-    (~22B параметров — заметно умнее 8B llama).
-    """
-    global _LAST_MISTRAL_ERROR
-    api_key = (os.getenv("MISTRAL_API_KEY") or "").strip().strip('"').strip("'")
-    if not api_key:
-        _LAST_MISTRAL_ERROR = "MISTRAL_API_KEY не задан"
-        return None
-
-    model = os.getenv("MISTRAL_MODEL", "mistral-small-latest").strip().strip('"').strip("'")
-    prompt = system_prompt or SYSTEM_PROMPT
-
-    try:
-        resp = requests.post(
-            "https://api.mistral.ai/v1/chat/completions",
-            headers={
-                "Authorization": f"Bearer {api_key}",
-                "Content-Type": "application/json",
-            },
-            json={
-                "model": model,
-                "messages": [
-                    {"role": "system", "content": prompt},
-                    {"role": "user", "content": user_message},
-                ],
-                "max_tokens": max_tokens,
-                "temperature": 0.2,
-            },
-            timeout=30,
-        )
-        if resp.status_code == 200:
-            _LAST_MISTRAL_ERROR = None
-            return resp.json()["choices"][0]["message"]["content"].strip()
-        _LAST_MISTRAL_ERROR = f"HTTP {resp.status_code}: {resp.text[:150]}"
-    except Exception as e:
-        _LAST_MISTRAL_ERROR = f"{type(e).__name__}: {e}"
-        logger.error("Mistral error: %s", e)
-    return None
+    return {"groq": _LAST_GROQ_ERROR, "ollama": _LAST_OLLAMA_ERROR}
 
 
 def _get_groq_response(user_message: str) -> Optional[str]:
@@ -250,12 +198,7 @@ def analyze_signal(
     )
 
     # Try Groq first, fall back to Ollama
-    # Fallback chain: Groq → Mistral → Ollama
-    raw = (
-        _get_groq_response(user_message)
-        or _get_mistral_response(user_message)
-        or _get_ollama_response(user_message)
-    )
+    raw = _get_groq_response(user_message) or _get_ollama_response(user_message)
 
     if raw is None:
         errs = get_last_errors()
@@ -304,103 +247,25 @@ def analyze_signal(
     # ============================================================
     # Пост-валидация: страховка от галлюцинаций LLM (особенно 8B моделей).
     # Считаем "рекомендованный" вердикт по тем же правилам что в промпте.
+    # Если LLM сказала противоположное — переопределяем.
     # ============================================================
     rule_verdict = _rule_based_verdict(models_data)
-
-    # Также детектим явную числовую ошибку в reasoning
-    # (например "Direction 62.7% ниже порога 55%")
-    reasoning_has_error = _reasoning_has_numeric_error(reasoning, models_data)
-
-    if rule_verdict and (rule_verdict != verdict or reasoning_has_error):
-        if rule_verdict != verdict:
-            logger.warning(
-                "LLM verdict (%s) противоречит правилам (%s). Использую правило.",
-                verdict, rule_verdict,
-            )
-        if reasoning_has_error:
-            logger.warning(
-                "Reasoning от LLM содержит арифметическую ошибку — заменяю на правило-генерируемое."
-            )
+    if rule_verdict and rule_verdict != verdict:
+        logger.warning(
+            "LLM verdict (%s) противоречит правилам (%s). Использую правило, оверрайжу LLM.",
+            verdict, rule_verdict,
+        )
         verdict = rule_verdict
-        # Полностью пересобираем reasoning по правилам — гарантированно точное
-        reasoning = _build_rule_reasoning(models_data, rule_verdict)
+        reasoning = (
+            f"[Авто-коррекция] LLM ответила {verdict_orig if (verdict_orig := verdict) else 'неконсистентно'}, "
+            f"но числа явно говорят {rule_verdict}. {reasoning}"
+        ) if reasoning else f"Автоматическая оценка по метрикам: {rule_verdict}."
 
     return {
         "answer": verdict,
         "reasoning": reasoning,
         "explanation": reasoning,
     }
-
-
-def _reasoning_has_numeric_error(text: str, models_data: list) -> bool:
-    """
-    Детектит явную ошибку в reasoning вида:
-      "Direction Accuracy составляет 62.7%, что ниже порога 55%"
-    (62.7 НЕ ниже 55 — это галлюцинация).
-    """
-    if not text or not models_data:
-        return False
-    import re
-    # Берём direction_accuracy из единственной модели в payload (per-row case)
-    direction_vals = [m.get("direction_accuracy") for m in models_data
-                      if m.get("direction_accuracy") is not None]
-    if not direction_vals:
-        return False
-    da = float(direction_vals[0])
-
-    # Ищем фразы "X% ниже" или "X% выше" где X — конкретное число
-    lower_pattern = re.compile(
-        r"(\d{1,2}(?:[.,]\d+)?)\s*%[^.]{0,40}ниже\s+порога?\s+(\d{1,2})",
-        re.IGNORECASE,
-    )
-    higher_pattern = re.compile(
-        r"(\d{1,2}(?:[.,]\d+)?)\s*%[^.]{0,40}выше\s+порога?\s+(\d{1,2})",
-        re.IGNORECASE,
-    )
-    for m in lower_pattern.finditer(text):
-        val = float(m.group(1).replace(",", "."))
-        threshold = float(m.group(2))
-        # Если LLM пишет "X% ниже порога Y", но фактически X >= Y → ошибка
-        if abs(val - da) < 1.5 and val >= threshold:
-            return True
-    for m in higher_pattern.finditer(text):
-        val = float(m.group(1).replace(",", "."))
-        threshold = float(m.group(2))
-        if abs(val - da) < 1.5 and val < threshold:
-            return True
-    return False
-
-
-def _build_rule_reasoning(models_data: list, verdict: str) -> str:
-    """Технически точное обоснование вердикта на основе численных правил."""
-    if not models_data:
-        return f"Оценка по правилам: {verdict}"
-
-    m = models_data[0]  # per-row case
-    parts = []
-    da = m.get("direction_accuracy")
-    pf = m.get("profit_factor")
-    live = m.get("recent_hit_rate_30d")
-    n = m.get("recent_samples_30d") or 0
-
-    if live is not None and n >= 5:
-        cmp = "выше" if live >= 55 else ("ниже" if live < 45 else "в серой зоне")
-        parts.append(f"LIVE Direction за 30д = {live:.1f}% ({n} прогнозов), {cmp} ключевых порогов")
-    elif da is not None:
-        cmp = "выше" if da >= 55 else "ниже"
-        parts.append(f"Direction Accuracy = {da:.1f}% ({cmp} порога 55%)")
-
-    if pf is not None:
-        if pf >= 1.0:
-            parts.append(f"Profit Factor = {pf:.2f} (>=1.0, прибыльная)")
-        else:
-            parts.append(f"Profit Factor = {pf:.2f} (<1.0, в минусе)")
-
-    body = ". ".join(parts)
-    if verdict == "AGREE":
-        return f"{body}. Метрики достаточно надёжны — доверять сигналу можно."
-    else:
-        return f"{body}. По правилам сигналу доверять не стоит."
 
 
 def _rule_based_verdict(models_data: list) -> Optional[str]:
@@ -695,11 +560,8 @@ def generate_ticker_report(
     )
 
     # ----- Запрос к LLM -----
-    raw = (
-        _get_groq_response_custom(user_message, REPORT_SYSTEM_PROMPT, max_tokens=600)
-        or _get_mistral_response(user_message, REPORT_SYSTEM_PROMPT, max_tokens=600)
+    raw = _get_groq_response_custom(user_message, REPORT_SYSTEM_PROMPT, max_tokens=600) \
         or _get_ollama_response_custom(user_message, REPORT_SYSTEM_PROMPT)
-    )
 
     if not raw:
         errs = get_last_errors()
@@ -881,7 +743,6 @@ def summarize_ta_indicators(ticker: str, ta_indicators: dict) -> dict:
 
     raw = (
         _get_groq_response_custom(user_message, TA_SUMMARY_SYSTEM_PROMPT, max_tokens=200)
-        or _get_mistral_response(user_message, TA_SUMMARY_SYSTEM_PROMPT, max_tokens=200)
         or _get_ollama_response_custom(user_message, TA_SUMMARY_SYSTEM_PROMPT)
     )
     if not raw:
@@ -985,7 +846,6 @@ def explain_ta_indicators(ticker: str, ta_indicators: dict) -> dict:
 
     raw = (
         _get_groq_response_custom(user_message, TA_EXPLAIN_SYSTEM_PROMPT, max_tokens=350)
-        or _get_mistral_response(user_message, TA_EXPLAIN_SYSTEM_PROMPT, max_tokens=350)
         or _get_ollama_response_custom(user_message, TA_EXPLAIN_SYSTEM_PROMPT)
     )
 

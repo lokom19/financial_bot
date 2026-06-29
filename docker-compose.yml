@@ -54,8 +54,6 @@ services:
       - SECRET_KEY=${SECRET_KEY:-change-me-in-production}
       - GROQ_API_KEY=${GROQ_API_KEY:-}
       - GROQ_MODEL=${GROQ_MODEL:-llama-3.3-70b-versatile}
-      - MISTRAL_API_KEY=${MISTRAL_API_KEY:-}
-      - MISTRAL_MODEL=${MISTRAL_MODEL:-mistral-small-latest}
       - LLM_URL=${LLM_URL:-http://ollama:11434/api/chat}
       - LLM_MODEL=${LLM_MODEL:-llama3}
       - LLM_TIMEOUT=${LLM_TIMEOUT:-30}
@@ -110,8 +108,6 @@ services:
       - INVEST_TOKEN=${INVEST_TOKEN}
       - GROQ_API_KEY=${GROQ_API_KEY:-}
       - GROQ_MODEL=${GROQ_MODEL:-llama-3.3-70b-versatile}
-      - MISTRAL_API_KEY=${MISTRAL_API_KEY:-}
-      - MISTRAL_MODEL=${MISTRAL_MODEL:-mistral-small-latest}
       - LLM_URL=${LLM_URL:-http://ollama:11434/api/chat}
       - LLM_MODEL=${LLM_MODEL:-llama3}
       - NIGHTLY_FETCH_DAYS=${NIGHTLY_FETCH_DAYS:-7}
