@@ -34,6 +34,7 @@ import json
 from services.llm_service import analyze_signal, generate_ticker_report
 from services.ta_indicators import compute_ta_indicators as _compute_ta
 from services.performance_tracker import compute_recent_hit_rates
+from services.news_service import fetch_news_for_ticker
 
 load_dotenv()
 
@@ -287,13 +288,24 @@ def generate_and_save_ticker_reports(engine, pairs):
                 d = None
                 prediction_d = None
 
+            # Подтягиваем новости (smart-lab) — без них LLM в отчёте
+            # пишет "новостных данных нет", даже когда на странице виджет
+            # их показывает (виджет дёргает API отдельно на лету).
+            try:
+                news_items = fetch_news_for_ticker(ticker_name, max_items=5)
+                if news_items:
+                    print(f"   📰 Подтянуто {len(news_items)} новостей по {ticker_name}")
+            except Exception as e:
+                print(f"   ⚠ Не удалось подтянуть новости по {ticker_name}: {e}")
+                news_items = None
+
             # Запрашиваем LLM на каждом прогоне (свежий вердикт)
             report = generate_ticker_report(
                 ticker=ticker_name,
                 current_price=current_price or 0.0,
                 models_data=models_data,
                 ta_indicators=ta,
-                news_items=None,
+                news_items=news_items,
                 data_date=data_date_iso,
                 prediction_date=prediction_d.isoformat() if prediction_d else None,
             )
