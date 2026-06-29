@@ -355,6 +355,12 @@ def _load_ticker_overview(db: Session, ticker_or_figi: str) -> dict:
         "data_date": data_date,
         "prediction_date": prediction_date,
         "last_training_at": last_training_dt.isoformat() if last_training_dt else None,
+        # Текущие пороги торговых сигналов (в %)
+        "signal_thresholds": {
+            "buy": float(_os.getenv("SIGNAL_BUY_THRESHOLD", "0.2")),
+            "sell": float(_os.getenv("SIGNAL_SELL_THRESHOLD", "-0.2")),
+            "neutral": float(_os.getenv("SIGNAL_NEUTRAL_THRESHOLD", "0.05")),
+        },
     }
 
 

@@ -200,6 +200,17 @@
                 <b style="color: var(--text); font-variant-numeric: tabular-nums;">{{ overview.last_training_at[:16].replace('T',' ') }}</b>
             </div>
             {% endif %}
+            {% if overview.signal_thresholds %}
+            <div style="background: var(--surface-alt); padding: 8px 14px; border-radius: 10px; font-size: 13px;"
+                 title="Модель предсказывает ожидаемое изменение цены в %. Если оно превышает порог BUY — генерируется сигнал на покупку, ниже SELL — на продажу. Между ними — HOLD/NEUTRAL.">
+                <span style="color: var(--text-muted); margin-right: 8px;">🎯 Пороги сигналов:</span>
+                <b style="color: var(--success);">BUY ≥ +{{ overview.signal_thresholds.buy }}%</b>
+                <span style="color: var(--text-soft); margin: 0 4px;">·</span>
+                <b style="color: var(--danger);">SELL ≤ {{ overview.signal_thresholds.sell }}%</b>
+                <span style="color: var(--text-soft); margin: 0 4px;">·</span>
+                <span style="color: var(--text-muted);">NEUTRAL |x| &lt; {{ overview.signal_thresholds.neutral }}%</span>
+            </div>
+            {% endif %}
         </div>
         {% endif %}
 
