@@ -1042,6 +1042,19 @@ async def view_model(request: Request,
                 ticker = result.ticker_name or result.db_name or "Unknown"
                 date = result.timestamp.strftime("%Y-%m-%d") if result.timestamp else "Unknown"
 
+                # Дата последней свечи в данных
+                data_end = result.data_end_date.isoformat() if result.data_end_date else None
+                data_start = result.data_start_date.isoformat() if result.data_start_date else None
+
+                # Дата на которую делается прогноз (следующий торговый день
+                # после data_end). Пятница → понедельник.
+                prediction_date_str = None
+                if result.data_end_date:
+                    from datetime import timedelta as _td
+                    d = result.data_end_date
+                    delta = 3 if d.weekday() == 4 else (2 if d.weekday() == 5 else 1)
+                    prediction_date_str = (d + _td(days=delta)).isoformat()
+
                 files_data.append({
                     'name': result.db_name,
                     'content': content,
@@ -1052,6 +1065,9 @@ async def view_model(request: Request,
                     'ticker': ticker,
                     'algorithm': model_name,
                     'date': date,
+                    'data_end': data_end,
+                    'data_start': data_start,
+                    'prediction_date': prediction_date_str,
                     'expected_change': expected_change,
                     'current_price': current_price,
                     'win_rate': win_rate,

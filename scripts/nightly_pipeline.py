@@ -503,17 +503,17 @@ def process_llm_for_new_results(engine, figi_list: List[str]) -> dict:
         logger.info(f"Найдено {len(rows)} записей без LLM-валидации")
 
         stats = {"agree": 0, "disagree": 0, "unavailable": 0, "errors": 0}
-        ta_cache = {}  # figi -> dict с индикаторами
 
         for row in rows:
             row_id = row[0]
-            figi = row[1]
             ticker = row[2] or row[1]
 
-            if figi not in ta_cache:
-                ta_cache[figi] = compute_ta_indicators(engine, figi)
-
             try:
+                # ВАЖНО: для per-row LLM-анализа НЕ передаём TA-индикаторы
+                # и новости. LLM оценивает ИСКЛЮЧИТЕЛЬНО качество обучения
+                # модели (R², Direction Accuracy, согласованность сигнала)
+                # — это per-model "self-check" обучения, не общий рыночный
+                # анализ. Общий анализ делает generate_ticker_report.
                 result = analyze_signal(
                     ticker=ticker,
                     current_price=float(row[4] or 0),
@@ -526,7 +526,8 @@ def process_llm_for_new_results(engine, figi_list: List[str]) -> dict:
                     }],
                     r2_avg=float(row[6]) if row[6] is not None else 0,
                     direction_accuracy_avg=float(row[7]) if row[7] is not None else 50,
-                    ta_indicators=ta_cache[figi],
+                    # ta_indicators=None — намеренно: LLM смотрит только на
+                    # обучение этой конкретной модели
                 )
                 answer = result["answer"]
                 reasoning = result.get("reasoning", "") or result.get("explanation", "")

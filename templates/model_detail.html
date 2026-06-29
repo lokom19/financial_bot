@@ -214,7 +214,13 @@
 
                     <div class="card-meta">
                         <span>{{ file.algorithm }}</span>
-                        <span>{{ file.date }}</span>
+                        <span title="Когда был выполнен прогон обучения">🕐 {{ file.date }}</span>
+                        {% if file.data_end %}
+                        <span title="Дата последней свечи, на которой модель обучалась">📅 Данные: {{ file.data_end }}</span>
+                        {% endif %}
+                        {% if file.prediction_date %}
+                        <span title="Дата следующего торгового дня — на неё делается прогноз" style="color: var(--primary); font-weight: 600;">🎯 Прогноз: {{ file.prediction_date }}</span>
+                        {% endif %}
                     </div>
 
                     <!-- Structured metrics grid -->
