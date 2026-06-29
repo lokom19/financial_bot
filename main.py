@@ -888,6 +888,12 @@ async def llm_ticker_report(request: Request, ticker: str):
             except Exception:
                 sections = None
 
+        # Fallback: для старых записей где парсер не вытащил entry_price,
+        # но вердикт BUY/SELL — показываем current_price (лучше чем "—")
+        entry = report.entry_price
+        if entry is None and report.verdict in ("BUY", "SELL") and report.current_price:
+            entry = float(report.current_price)
+
         return {
             "ticker": ticker_name,
             "data_date": report.data_date.isoformat() if report.data_date else None,
@@ -895,7 +901,7 @@ async def llm_ticker_report(request: Request, ticker: str):
             "current_price": report.current_price,
             "verdict": report.verdict,
             "confidence": report.confidence,
-            "entry_price": report.entry_price,
+            "entry_price": entry,
             "target_price": report.target_price,
             "stop_loss": report.stop_loss,
             "reasoning": report.reasoning,

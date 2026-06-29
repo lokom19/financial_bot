@@ -581,6 +581,11 @@ def generate_ticker_report(
     target_price = sections.pop("_target_price", None)
     stop_loss = sections.pop("_stop_loss", None)
 
+    # Fallback: если LLM не указала цену входа явно, но дала BUY/SELL —
+    # подставляем текущую цену, иначе в UI болтается "—"
+    if entry_price is None and verdict in ("BUY", "SELL") and current_price:
+        entry_price = float(current_price)
+
     return {
         "verdict": verdict,
         "confidence": confidence,
@@ -620,20 +625,36 @@ def _parse_report_sections(text: str) -> dict:
     if m:
         result["_confidence"] = m.group(1).lower()
 
-    # Цены — извлекаем числа после меток
-    def _parse_price(label: str):
-        pat = label + r"[:\s]+([-+]?\d+(?:[.,]\d+)?)"
-        mp = re.search(pat, text, re.IGNORECASE)
-        if mp:
-            try:
-                return float(mp.group(1).replace(",", "."))
-            except ValueError:
-                return None
+    # Цены — извлекаем числа после меток, перебирая несколько паттернов:
+    # LLM не всегда придерживается строгого формата "ЦЕНА ВХОДА: 3380",
+    # часто пишет в свободной форме типа "при цене около 3380".
+    def _parse_price(*patterns: str):
+        for pat in patterns:
+            mp = re.search(pat, text, re.IGNORECASE)
+            if mp:
+                try:
+                    return float(mp.group(1).replace(",", "."))
+                except ValueError:
+                    continue
         return None
 
-    result["_entry_price"] = _parse_price(r"ЦЕНА\s+ВХОДА")
-    result["_target_price"] = _parse_price(r"ЦЕЛЕВ\w*\s+ЦЕНА")
-    result["_stop_loss"] = _parse_price(r"СТОП[-\s]?ЛОСС")
+    num = r"([-+]?\d+(?:[.,]\d+)?)"
+    result["_entry_price"] = _parse_price(
+        r"ЦЕНА\s+ВХОДА[:\s]+" + num,
+        r"ВХОД[:\s]+" + num,
+        r"при\s+цене\s+(?:около\s+|~)?" + num,
+        r"вход\w*\s+(?:около\s+|~|по\s+)?" + num,
+    )
+    result["_target_price"] = _parse_price(
+        r"ЦЕЛЕВ\w*\s+ЦЕНА[:\s]+" + num,
+        r"ЦЕЛЬ[:\s]+" + num,
+        r"цел\w*\s+(?:продажи|покупки)\s+при\s+цене\s+" + num,
+        r"тейк[-\s]?профит[:\s]+" + num,
+    )
+    result["_stop_loss"] = _parse_price(
+        r"СТОП[-\s]?ЛОСС[:\s]+" + num,
+        r"стоп[:\s]+" + num,
+    )
 
     # Разделы — ищем по ключевым словам
     patterns = {
