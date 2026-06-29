@@ -76,6 +76,16 @@ AVAILABLE_MODELS = {
         'function': 'main',
         'description': 'Random Forest Regression'
     },
+    'extra_trees': {
+        'module': 'models.extra_trees_model',
+        'function': 'main',
+        'description': 'Extra Trees Regressor (rand. RF)'
+    },
+    'huber': {
+        'module': 'models.huber_model',
+        'function': 'main',
+        'description': 'Huber Regression (robust linear)'
+    },
     'arima': {
         'module': 'models.arima',
         'function': 'main',

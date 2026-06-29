@@ -33,6 +33,7 @@ import json
 
 from services.llm_service import analyze_signal, generate_ticker_report
 from services.ta_indicators import compute_ta_indicators as _compute_ta
+from services.performance_tracker import compute_recent_hit_rates
 
 load_dotenv()
 
@@ -60,8 +61,9 @@ EXCLUDED_MODELS = [
 ]
 # Все доступные модели (синхронизировано с scripts/train_models.py)
 ALL_MODELS = [
-    "ridge", "xgboost", "lightgbm", "catboost",
-    "random_forest", "arima", "arma_garch", "rf_classifier",
+    "ridge", "huber", "xgboost", "lightgbm", "catboost",
+    "random_forest", "extra_trees",
+    "arima", "arma_garch", "rf_classifier",
     "prophet", "lstm", "tcn", "rdpg_lstm",
 ]
 
@@ -483,12 +485,21 @@ def process_llm_for_new_results(engine, figi_list: List[str]) -> dict:
     Session = sessionmaker(bind=engine)
     session = Session()
 
+    # Подгружаем live hit rates по тикерам — реальная свежая точность моделей
+    live_perf_cache = {}
+    for figi in figi_list:
+        try:
+            live_perf_cache[figi] = compute_recent_hit_rates(engine, figi)
+        except Exception:
+            live_perf_cache[figi] = {}
+
     try:
         rows = session.execute(
             text("""
                 SELECT id, db_name, ticker_name, model_name,
                        current_price, trading_signal,
-                       test_r2, test_direction_accuracy
+                       test_r2, test_direction_accuracy,
+                       win_rate, profit_factor, cumulative_return, test_samples
                 FROM public.model_results
                 WHERE llm_signal IS NULL
                   AND timestamp >= :since
@@ -506,28 +517,36 @@ def process_llm_for_new_results(engine, figi_list: List[str]) -> dict:
 
         for row in rows:
             row_id = row[0]
-            ticker = row[2] or row[1]
+            db_name = row[1]
+            ticker = row[2] or db_name
+            model_name = row[3]
+
+            # Live точность этой модели по данному тикеру
+            live = live_perf_cache.get(db_name, {}).get(model_name, {})
+            live30 = live.get(30, {})
 
             try:
-                # ВАЖНО: для per-row LLM-анализа НЕ передаём TA-индикаторы
-                # и новости. LLM оценивает ИСКЛЮЧИТЕЛЬНО качество обучения
-                # модели (R², Direction Accuracy, согласованность сигнала)
-                # — это per-model "self-check" обучения, не общий рыночный
-                # анализ. Общий анализ делает generate_ticker_report.
+                # Per-row LLM анализ: ТОЛЬКО метрики обучения этой модели
+                # + live точность. Без TA / новостей / рынка.
                 result = analyze_signal(
                     ticker=ticker,
                     current_price=float(row[4] or 0),
                     trading_signal=row[5] or "HOLD",
                     models_data=[{
-                        "model_name": row[3],
+                        "model_name": model_name,
                         "signal": row[5],
                         "r2": float(row[6]) if row[6] is not None else 0,
                         "direction_accuracy": float(row[7]) if row[7] is not None else 50,
+                        "win_rate": float(row[8]) if row[8] is not None else None,
+                        "profit_factor": float(row[9]) if row[9] is not None else None,
+                        "cumulative_return": float(row[10]) if row[10] is not None else None,
+                        "test_samples": int(row[11]) if row[11] is not None else None,
+                        # LIVE (свежая реальная точность)
+                        "recent_hit_rate_30d": live30.get("hit_rate"),
+                        "recent_samples_30d": live30.get("total", 0),
                     }],
                     r2_avg=float(row[6]) if row[6] is not None else 0,
                     direction_accuracy_avg=float(row[7]) if row[7] is not None else 50,
-                    # ta_indicators=None — намеренно: LLM смотрит только на
-                    # обучение этой конкретной модели
                 )
                 answer = result["answer"]
                 reasoning = result.get("reasoning", "") or result.get("explanation", "")
