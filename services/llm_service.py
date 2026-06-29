@@ -43,6 +43,17 @@ R² игнорируй — для returns близка к 0, не показат
     * Direction < 50% OR Profit Factor < 0.8 → DISAGREE
     * Иначе → DISAGREE (осторожность)
 
+ПРИМЕРЫ ПРАВИЛЬНОЙ ЛОГИКИ:
+- Direction = 59.3% → 59.3 > 55, выше порога → AGREE
+- Direction = 52.0% → 52 < 55, ниже порога → DISAGREE (либо смотри Profit Factor)
+- Direction = 55.0% → ровно 55, на пороге → AGREE
+- Direction = 44.8% → 44.8 < 55, ниже порога → DISAGREE
+
+⚠️ САМОПРОВЕРКА:
+Перед тем как написать вердикт — сравни числа.
+"X% выше Y%" означает X > Y. "X% ниже Y%" означает X < Y.
+Не путай больше/меньше!
+
 ФОРМАТ ОТВЕТА (строго):
 Строка 1: AGREE или DISAGREE
 Строка 2-3: 1-2 коротких предложения, ССЫЛАЯСЬ НА КОНКРЕТНЫЕ ЦИФРЫ
@@ -233,11 +244,87 @@ def analyze_signal(
     # Ограничиваем длину для UI/БД
     reasoning = reasoning[:1000]
 
+    # ============================================================
+    # Пост-валидация: страховка от галлюцинаций LLM (особенно 8B моделей).
+    # Считаем "рекомендованный" вердикт по тем же правилам что в промпте.
+    # Если LLM сказала противоположное — переопределяем.
+    # ============================================================
+    rule_verdict = _rule_based_verdict(models_data)
+    if rule_verdict and rule_verdict != verdict:
+        logger.warning(
+            "LLM verdict (%s) противоречит правилам (%s). Использую правило, оверрайжу LLM.",
+            verdict, rule_verdict,
+        )
+        verdict = rule_verdict
+        reasoning = (
+            f"[Авто-коррекция] LLM ответила {verdict_orig if (verdict_orig := verdict) else 'неконсистентно'}, "
+            f"но числа явно говорят {rule_verdict}. {reasoning}"
+        ) if reasoning else f"Автоматическая оценка по метрикам: {rule_verdict}."
+
     return {
         "answer": verdict,
         "reasoning": reasoning,
         "explanation": reasoning,
     }
+
+
+def _rule_based_verdict(models_data: list) -> Optional[str]:
+    """
+    Алгоритмическая (без LLM) оценка по тем же правилам что в SYSTEM_PROMPT.
+    Используется для пост-валидации LLM-ответа.
+    Возвращает 'AGREE' / 'DISAGREE' или None если данных мало.
+
+    Работает корректно как для per-row (1 модель в списке) так и для агрегатов.
+    """
+    if not models_data:
+        return None
+
+    # Усредняем по списку моделей (для per-row — список из 1)
+    direction_vals = []
+    live30_vals = []
+    live30_samples = []
+    pf_vals = []
+    for m in models_data:
+        d = m.get("direction_accuracy")
+        if d is not None:
+            direction_vals.append(float(d))
+        live = m.get("recent_hit_rate_30d")
+        if live is not None:
+            live30_vals.append(float(live))
+        ns = m.get("recent_samples_30d") or 0
+        live30_samples.append(int(ns))
+        pf = m.get("profit_factor")
+        if pf is not None and float(pf) > 0:
+            pf_vals.append(float(pf))
+
+    avg_direction = sum(direction_vals) / len(direction_vals) if direction_vals else None
+    avg_live = sum(live30_vals) / len(live30_vals) if live30_vals else None
+    min_samples = min(live30_samples) if live30_samples else 0
+    avg_pf = sum(pf_vals) / len(pf_vals) if pf_vals else None
+
+    # Если LIVE достаточно — опираемся на него
+    if avg_live is not None and min_samples >= 5:
+        if avg_live >= 55:
+            return "AGREE"
+        if avg_live < 45:
+            return "DISAGREE"
+        # 45-55: смотрим historical direction
+        if avg_direction is not None and avg_direction >= 55:
+            return "AGREE"
+        return "DISAGREE"
+
+    # LIVE нет/мало — fallback на исторические
+    if avg_direction is None:
+        return None
+    if avg_direction >= 55:
+        if avg_pf is None or avg_pf >= 1.0:
+            return "AGREE"
+    if avg_direction < 50:
+        return "DISAGREE"
+    if avg_pf is not None and avg_pf < 0.8:
+        return "DISAGREE"
+    # Серая зона 50-55% Direction с нормальным PF — DISAGREE (осторожность)
+    return "DISAGREE"
 
 
 # ============================================================
