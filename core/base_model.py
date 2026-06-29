@@ -281,8 +281,10 @@ class BaseTradeModel(ABC):
         X_scaled = self.scaler.transform(last_row)
         raw_pred = float(self._predict(X_scaled)[0])
 
-        # Get current price
-        current_price = float(df['close'].iloc[-1])
+        # Current price ОБЯЗАТЕЛЬНО из df_for_pred (без partial candle),
+        # иначе current_price = текущая intraday-цена, которая постоянно
+        # ревизуется Tinkoff и не совпадает с close на следующий день.
+        current_price = float(df_for_pred['close'].iloc[-1])
 
         # Конвертируем raw_pred → predicted_price в зависимости от таргета
         if self.TARGET_COLUMN == "next_return":
