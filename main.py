@@ -543,8 +543,11 @@ async def ai_reports_history(ticker: str, days: int = 60):
             return JSONResponse(status_code=404, content={"error": f"Тикер {ticker} не найден"})
         ticker_name, figi = row[0], row[1]
 
-        # DISTINCT ON (data_date) — если за день было несколько прогонов
-        # (утренний/ночной/ручной), показываем ТОЛЬКО последний по timestamp.
+        # DISTINCT ON (prediction_date) — для каждой даты-прогноза показываем
+        # ТОЛЬКО самый свежий вердикт.
+        # Зачем: несколько ночных прогонов (например пт/сб/вс) могут целиться
+        # в один и тот же понедельник — пользователю нужен последний по
+        # timestamp вердикт, а не дублирование.
         reports = db.execute(text("""
             SELECT id, timestamp, data_date, prediction_date, current_price,
                    verdict, confidence, entry_price, target_price, stop_loss,
@@ -552,13 +555,14 @@ async def ai_reports_history(ticker: str, days: int = 60):
                    actual_close, actual_high, actual_low,
                    correct_direction, target_hit, stop_hit
             FROM (
-                SELECT DISTINCT ON (data_date) *
+                SELECT DISTINCT ON (prediction_date) *
                 FROM public.ticker_reports
                 WHERE figi = :figi
                   AND timestamp >= NOW() - (:days || ' days')::interval
-                ORDER BY data_date DESC NULLS LAST, timestamp DESC
+                  AND prediction_date IS NOT NULL
+                ORDER BY prediction_date DESC NULLS LAST, timestamp DESC
             ) latest
-            ORDER BY data_date DESC NULLS LAST, timestamp DESC
+            ORDER BY prediction_date DESC NULLS LAST, timestamp DESC
         """), {"figi": figi, "days": days}).fetchall()
 
         items = []
