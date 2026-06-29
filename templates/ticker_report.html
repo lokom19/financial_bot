@@ -432,6 +432,7 @@
                             <th class="right">Hist Dir%</th>
                             <th class="right">Прогноз цены</th>
                             <th class="right">Ожид. изм. %</th>
+                            <th class="right" title="На каких данных модель училась (период)">Обучена на</th>
                         </tr>
                     </thead>
                     <tbody>
@@ -457,6 +458,13 @@
                             <td class="right">{{ "%.1f"|format(m.direction_accuracy) if m.direction_accuracy is not none else '—' }}</td>
                             <td class="right">{{ "%.2f"|format(m.predicted_price) if m.predicted_price is not none else '—' }}</td>
                             <td class="right">{{ "%+.2f"|format(m.expected_change) if m.expected_change is not none else '—' }}</td>
+                            <td class="right" style="font-size: 11px; color: var(--text-muted); white-space: nowrap;">
+                                {% if m.train_start and m.train_end %}
+                                    {{ m.train_start }}<br>
+                                    <span style="color: var(--text-soft);">{{ m.train_end }}</span>
+                                    {% if m.train_samples %}<br><small>{{ m.train_samples }} строк</small>{% endif %}
+                                {% else %}—{% endif %}
+                            </td>
                         </tr>
                         {% endfor %}
                     </tbody>

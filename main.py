@@ -301,6 +301,11 @@ def _load_ticker_overview(db: Session, ticker_or_figi: str) -> dict:
             "recent_samples_5d": recent5.get("total", 0),
             "recent_samples_30d": recent30.get("total", 0),
             "is_disabled": is_disabled,
+            # Период обучения
+            "train_start": r.data_start_date.isoformat() if r.data_start_date else None,
+            "train_end": r.data_end_date.isoformat() if r.data_end_date else None,
+            "train_samples": r.train_samples,
+            "test_samples": r.test_samples,
         })
         if r.test_r2 is not None:
             r2_vals.append(float(r.test_r2))

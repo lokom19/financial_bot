@@ -255,8 +255,24 @@ class BaseTradeModel(ABC):
         if not self.is_fitted:
             raise RuntimeError("Model must be fitted before prediction")
 
+        # Защита от неполной сегодняшней свечи. Согласовано с ta_indicators:
+        # если рынок открыт и USE_PARTIAL_CANDLE!=true — отбрасываем последнюю
+        # строку если её дата = today MSK.
+        import os as _os
+        from datetime import datetime as _dt, timezone as _tz, timedelta as _td
+        _MSK = _tz(_td(hours=3))
+        use_partial = _os.getenv("USE_PARTIAL_CANDLE", "false").lower() == "true"
+        market_open_hour = _dt.now(_MSK).hour < 20 and _dt.now(_MSK).weekday() < 5
+
+        df_for_pred = df
+        if not use_partial and market_open_hour and 'timestamp' in df.columns:
+            today = _dt.now(_MSK).date()
+            last_ts = pd.to_datetime(df['timestamp'].iloc[-1])
+            if last_ts.date() >= today:
+                df_for_pred = df.iloc[:-1].copy()
+
         # Create features
-        df_features = self.prepare_features(df)
+        df_features = self.prepare_features(df_for_pred)
 
         # Use the last available row
         last_row = df_features[self.feature_columns].iloc[[-1]]
