@@ -215,6 +215,29 @@ def load_data(ticker_name: str, add_fear_greed: bool = True, engine=engine) -> p
         if 'timestamp' in df.columns and not df.empty:
             df['timestamp'] = pd.to_datetime(df['timestamp'])
 
+        # Защита от НЕЗАКРЫТОЙ сегодняшней свечи: если рынок ещё открыт
+        # (до 20:00 МСК в будни) и в БД есть свеча за сегодня — она частичная
+        # (Tinkoff отдаёт текущую цену как "close"). Отбрасываем её, чтобы
+        # ни обучение ни прогноз не использовали недостоверные данные.
+        # Поведение управляется через USE_PARTIAL_CANDLE env.
+        use_partial = os.getenv("USE_PARTIAL_CANDLE", "false").lower() == "true"
+        if not use_partial and not df.empty and 'timestamp' in df.columns:
+            from datetime import timezone as _tz
+            _MSK = _tz(timedelta(hours=3))
+            now_msk = datetime.now(_MSK)
+            # Полный день после 20:00 МСК или в выходные
+            market_open = now_msk.hour < 20 and now_msk.weekday() < 5
+            if market_open:
+                today_msk = now_msk.date()
+                last_date = pd.to_datetime(df['timestamp'].iloc[-1]).date()
+                if last_date >= today_msk:
+                    before = len(df)
+                    df = df[pd.to_datetime(df['timestamp']).dt.date < today_msk].reset_index(drop=True)
+                    logging.info(
+                        f"load_data: отбросил {before - len(df)} незакрытых свечей "
+                        f"за {last_date} (рынок открыт, МСК {now_msk.strftime('%H:%M')})"
+                    )
+
         logging.info(f"Успешно загружены данные для {ticker_name}, {len(df)} строк")
 
         # Добавляем Fear and Greed Index, если запрошено
