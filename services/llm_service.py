@@ -247,25 +247,66 @@ def analyze_signal(
     # ============================================================
     # Пост-валидация: страховка от галлюцинаций LLM (особенно 8B моделей).
     # Считаем "рекомендованный" вердикт по тем же правилам что в промпте.
-    # Если LLM сказала противоположное — переопределяем.
+    # Если LLM сказала противоположное — переопределяем и переписываем
+    # обоснование с нуля (старый текст LLM мог содержать неверные числа).
     # ============================================================
     rule_verdict = _rule_based_verdict(models_data)
     if rule_verdict and rule_verdict != verdict:
+        verdict_llm = verdict  # сохраняем до перезаписи
         logger.warning(
-            "LLM verdict (%s) противоречит правилам (%s). Использую правило, оверрайжу LLM.",
-            verdict, rule_verdict,
+            "LLM verdict (%s) противоречит правилам (%s). Оверрайжу.",
+            verdict_llm, rule_verdict,
         )
         verdict = rule_verdict
-        reasoning = (
-            f"[Авто-коррекция] LLM ответила {verdict_orig if (verdict_orig := verdict) else 'неконсистентно'}, "
-            f"но числа явно говорят {rule_verdict}. {reasoning}"
-        ) if reasoning else f"Автоматическая оценка по метрикам: {rule_verdict}."
+        rule_text = _build_rule_reasoning(models_data, rule_verdict)
+        reasoning = f"[Авто-коррекция] LLM сказала {verdict_llm}, по числам — {rule_verdict}. {rule_text}"
 
     return {
         "answer": verdict,
         "reasoning": reasoning,
         "explanation": reasoning,
     }
+
+
+def _build_rule_reasoning(models_data: list, rule_verdict: str) -> str:
+    """
+    Генерирует короткое обоснование вердикта на основе тех же чисел,
+    что и _rule_based_verdict. Используется когда LLM-текст пришлось
+    отбросить из-за галлюцинаций.
+    """
+    if not models_data:
+        return f"Решение: {rule_verdict}."
+
+    direction_vals, live_vals, live_samples, pf_vals = [], [], [], []
+    for m in models_data:
+        if m.get("direction_accuracy") is not None:
+            direction_vals.append(float(m["direction_accuracy"]))
+        if m.get("recent_hit_rate_30d") is not None:
+            live_vals.append(float(m["recent_hit_rate_30d"]))
+        live_samples.append(int(m.get("recent_samples_30d") or 0))
+        if m.get("profit_factor") is not None and float(m["profit_factor"]) > 0:
+            pf_vals.append(float(m["profit_factor"]))
+
+    avg_direction = sum(direction_vals) / len(direction_vals) if direction_vals else None
+    avg_live = sum(live_vals) / len(live_vals) if live_vals else None
+    min_samples = min(live_samples) if live_samples else 0
+    avg_pf = sum(pf_vals) / len(pf_vals) if pf_vals else None
+
+    parts = []
+    if avg_live is not None and min_samples >= 5:
+        cmp = "≥" if avg_live >= 55 else ("<" if avg_live < 45 else "≈")
+        parts.append(f"LIVE Direction 30d = {avg_live:.1f}% ({cmp} порога 55/45%)")
+    else:
+        parts.append("LIVE-статистики недостаточно (< 5 свежих прогнозов)")
+        if avg_direction is not None:
+            cmp = "≥" if avg_direction >= 55 else ("<" if avg_direction < 50 else "≈")
+            parts.append(f"Direction Accuracy на тесте = {avg_direction:.1f}% ({cmp} порога 55%)")
+        if avg_pf is not None:
+            cmp = "≥" if avg_pf >= 1.0 else ("<" if avg_pf < 0.8 else "≈")
+            parts.append(f"Profit Factor = {avg_pf:.2f} ({cmp} 1.0)")
+
+    tail = "сигналу можно доверять" if rule_verdict == "AGREE" else "сигналу доверять не стоит"
+    return ". ".join(parts) + f" → {tail}."
 
 
 def _rule_based_verdict(models_data: list) -> Optional[str]:
