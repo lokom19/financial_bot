@@ -285,17 +285,7 @@ def generate_and_save_ticker_reports(engine, pairs):
                 d = None
                 prediction_d = None
 
-            # Не делаем дубль: если за data_date уже есть отчёт — пропускаем
-            existing = session.execute(text("""
-                SELECT id FROM public.ticker_reports
-                WHERE figi = :figi AND data_date = :dd
-                LIMIT 1
-            """), {"figi": figi, "dd": d}).fetchone()
-            if existing:
-                logger.info(f"  {ticker_name}: отчёт за {d} уже есть (id={existing[0]}), пропуск")
-                continue
-
-            # Запрашиваем LLM
+            # Запрашиваем LLM на каждом прогоне (свежий вердикт)
             report = generate_ticker_report(
                 ticker=ticker_name,
                 current_price=current_price or 0.0,
@@ -306,19 +296,7 @@ def generate_and_save_ticker_reports(engine, pairs):
                 prediction_date=prediction_d.isoformat() if prediction_d else None,
             )
 
-            session.execute(text("""
-                INSERT INTO public.ticker_reports (
-                    figi, ticker, timestamp, data_date, prediction_date,
-                    current_price, verdict, confidence,
-                    entry_price, target_price, stop_loss, reasoning,
-                    sections_json, models_snapshot_json, ta_snapshot_json
-                ) VALUES (
-                    :figi, :ticker, :ts, :dd, :pd,
-                    :cp, :v, :conf,
-                    :ep, :tp, :sl, :r,
-                    :sj, :mj, :tj
-                )
-            """), {
+            params = {
                 "figi": figi, "ticker": ticker_name,
                 "ts": datetime.utcnow(),
                 "dd": d, "pd": prediction_d,
@@ -332,13 +310,65 @@ def generate_and_save_ticker_reports(engine, pairs):
                 "sj": json.dumps(report.get("sections") or {}, ensure_ascii=False),
                 "mj": json.dumps(models_data, ensure_ascii=False),
                 "tj": json.dumps(ta, ensure_ascii=False, default=str),
-            })
+            }
+
+            # UPSERT: одна запись на (figi, data_date), но всегда свежая.
+            # Если за этот data_date уже есть отчёт — обновляем его (актуальный
+            # timestamp + актуальные данные/вердикт). Это даёт пользователю
+            # видеть "последний прогон ночью" даже если data_date не сменился.
+            existing = session.execute(text("""
+                SELECT id FROM public.ticker_reports
+                WHERE figi = :figi AND data_date = :dd
+                LIMIT 1
+            """), {"figi": figi, "dd": d}).fetchone()
+
+            if existing:
+                params["id"] = existing[0]
+                session.execute(text("""
+                    UPDATE public.ticker_reports
+                    SET timestamp = :ts,
+                        prediction_date = :pd,
+                        current_price = :cp,
+                        verdict = :v, confidence = :conf,
+                        entry_price = :ep, target_price = :tp, stop_loss = :sl,
+                        reasoning = :r,
+                        sections_json = :sj,
+                        models_snapshot_json = :mj,
+                        ta_snapshot_json = :tj,
+                        -- сбрасываем resolved-поля, т.к. вердикт новый
+                        actual_close = NULL,
+                        actual_high = NULL,
+                        actual_low = NULL,
+                        actual_resolved_at = NULL,
+                        correct_direction = NULL,
+                        target_hit = NULL,
+                        stop_hit = NULL
+                    WHERE id = :id
+                """), params)
+                logger.info(
+                    f"  {ticker_name} (UPDATE id={existing[0]}) → {report.get('verdict')} "
+                    f"(conf={report.get('confidence')}, target={report.get('target_price')})"
+                )
+            else:
+                session.execute(text("""
+                    INSERT INTO public.ticker_reports (
+                        figi, ticker, timestamp, data_date, prediction_date,
+                        current_price, verdict, confidence,
+                        entry_price, target_price, stop_loss, reasoning,
+                        sections_json, models_snapshot_json, ta_snapshot_json
+                    ) VALUES (
+                        :figi, :ticker, :ts, :dd, :pd,
+                        :cp, :v, :conf,
+                        :ep, :tp, :sl, :r,
+                        :sj, :mj, :tj
+                    )
+                """), params)
+                logger.info(
+                    f"  {ticker_name} (INSERT) → {report.get('verdict')} "
+                    f"(conf={report.get('confidence')}, target={report.get('target_price')})"
+                )
             session.commit()
             saved += 1
-            logger.info(
-                f"  {ticker_name} → {report.get('verdict')} "
-                f"(conf={report.get('confidence')}, target={report.get('target_price')})"
-            )
         logger.info(f"  Сохранено AI-отчётов: {saved}")
     finally:
         session.close()
