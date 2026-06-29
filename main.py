@@ -22,7 +22,7 @@ from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
 from sqlalchemy.orm import sessionmaker, Session
 
 from utils.calculate_weight import calculate_model_score
-from pydantic_models.model_result import ModelResult
+from pydantic_models.model_result import ModelResult, TickerReport
 from auth.models import User, Base as AuthBase
 from auth.security import decode_token
 from auth.security_middleware import limiter
@@ -655,10 +655,36 @@ async def ai_reports_history(ticker: str, days: int = 60):
         db.close()
 
 
-# Простой in-memory кеш для TA-объяснений и резюме (на день)
-# Ключ: (ticker, data_date) → {explanation, generated_at}
-_TA_EXPLAIN_CACHE: dict = {}
-_TA_SUMMARY_CACHE: dict = {}
+# Кеш LLM-ответов хранится в БД (ticker_reports), а не в памяти —
+# чтобы пережить рестарт контейнера и не дёргать Groq при каждом нажатии кнопки.
+
+def _get_or_create_today_report(db: Session, figi: str, ticker: str, data_date) -> TickerReport:
+    """
+    Достаёт TickerReport за data_date, или создаёт пустую запись
+    (используется как контейнер для кеша ta_summary / ta_explanation).
+    """
+    from datetime import datetime as _dt, date as _date
+    if isinstance(data_date, str):
+        try:
+            data_date = _date.fromisoformat(data_date)
+        except Exception:
+            data_date = None
+    q = db.query(TickerReport).filter(TickerReport.figi == figi)
+    if data_date:
+        q = q.filter(TickerReport.data_date == data_date)
+    row = q.order_by(TickerReport.timestamp.desc()).first()
+    if row:
+        return row
+    row = TickerReport(
+        figi=figi,
+        ticker=ticker,
+        timestamp=_dt.utcnow(),
+        data_date=data_date,
+    )
+    db.add(row)
+    db.commit()
+    db.refresh(row)
+    return row
 
 
 @app.get("/api/ticker/{ticker}/explain-ta", tags=["LLM"])
@@ -666,48 +692,54 @@ _TA_SUMMARY_CACHE: dict = {}
 async def explain_ta(request: Request, ticker: str, force: bool = False):
     """
     AI-объяснение текущих значений технических индикаторов простым языком.
-    Кешируется на день (по data_date). ?force=1 — перегенерировать.
+    Кеш в ticker_reports.ta_explanation_text. ?force=1 — перегенерировать.
     """
     db = SyncSessionLocal()
     try:
         overview = _load_ticker_overview(db, ticker)
-    finally:
-        db.close()
+        if not overview["ta"]:
+            return JSONResponse(
+                status_code=400,
+                content={"error": "Нет данных технического анализа для этого тикера"},
+            )
 
-    if not overview["ta"]:
-        return JSONResponse(
-            status_code=400,
-            content={"error": "Нет данных технического анализа для этого тикера"},
+        # figi для поиска записи кеша
+        figi_row = db.execute(
+            text("SELECT figi FROM public.tickers WHERE ticker = :v OR figi = :v"),
+            {"v": ticker},
+        ).fetchone()
+        figi = figi_row[0] if figi_row else ticker
+        report = _get_or_create_today_report(
+            db, figi, overview["ticker"], overview.get("data_date")
         )
 
-    cache_key = (overview["ticker"], overview.get("data_date"))
-    if not force and cache_key in _TA_EXPLAIN_CACHE:
-        cached = _TA_EXPLAIN_CACHE[cache_key]
+        if not force and report.ta_explanation_text:
+            return {
+                "ticker": overview["ticker"],
+                "data_date": overview.get("data_date"),
+                "explanation": report.ta_explanation_text,
+                "cached": True,
+                "generated_at": report.timestamp.isoformat() if report.timestamp else None,
+            }
+
+        result = explain_ta_indicators(overview["ticker"], overview["ta"])
+        if result.get("error"):
+            return JSONResponse(status_code=502, content={"error": result["error"]})
+
+        from datetime import datetime as _dt
+        report.ta_explanation_text = result["explanation"]
+        report.timestamp = _dt.utcnow()
+        db.commit()
+
         return {
             "ticker": overview["ticker"],
             "data_date": overview.get("data_date"),
-            "explanation": cached["explanation"],
-            "cached": True,
-            "generated_at": cached["generated_at"],
+            "explanation": result["explanation"],
+            "cached": False,
+            "generated_at": report.timestamp.isoformat(),
         }
-
-    result = explain_ta_indicators(overview["ticker"], overview["ta"])
-    if result.get("error"):
-        return JSONResponse(status_code=502, content={"error": result["error"]})
-
-    from datetime import datetime as _dt
-    generated_at = _dt.utcnow().isoformat()
-    _TA_EXPLAIN_CACHE[cache_key] = {
-        "explanation": result["explanation"],
-        "generated_at": generated_at,
-    }
-    return {
-        "ticker": overview["ticker"],
-        "data_date": overview.get("data_date"),
-        "explanation": result["explanation"],
-        "cached": False,
-        "generated_at": generated_at,
-    }
+    finally:
+        db.close()
 
 
 @app.get("/api/ticker/{ticker}/news", tags=["News"])
@@ -731,84 +763,114 @@ async def ta_summary(request: Request, ticker: str, force: bool = False):
     """
     Краткий вывод по техническим индикаторам:
     БЫЧИЙ / МЕДВЕЖИЙ / СМЕШАННЫЙ / НЕЙТРАЛЬНЫЙ + одно предложение пояснения.
-    Кеш на день.
+    Кеш в ticker_reports.ta_summary_json.
     """
+    import json
     db = SyncSessionLocal()
     try:
         overview = _load_ticker_overview(db, ticker)
-    finally:
-        db.close()
+        if not overview["ta"]:
+            return JSONResponse(status_code=400, content={"error": "Нет данных TA"})
 
-    if not overview["ta"]:
-        return JSONResponse(status_code=400, content={"error": "Нет данных TA"})
-
-    cache_key = (overview["ticker"], overview.get("data_date"))
-    if not force and cache_key in _TA_SUMMARY_CACHE:
-        return {**_TA_SUMMARY_CACHE[cache_key], "cached": True}
-
-    result = summarize_ta_indicators(overview["ticker"], overview["ta"])
-    if result.get("error"):
-        return JSONResponse(status_code=502, content={"error": result["error"]})
-
-    from datetime import datetime as _dt
-    payload = {
-        "ticker": overview["ticker"],
-        "data_date": overview.get("data_date"),
-        "verdict": result["verdict"],
-        "strength": result["strength"],
-        "summary": result["summary"],
-        "key_indicators": result["key_indicators"],
-        "generated_at": _dt.utcnow().isoformat(),
-    }
-    _TA_SUMMARY_CACHE[cache_key] = payload
-    return {**payload, "cached": False}
-
-
-class TickerReportRequest(BaseModel):
-    ticker: str  # либо тикер, либо FIGI
-
-
-@app.post("/api/llm/ticker-report", tags=["LLM"])
-@limiter.limit("20/hour")
-async def llm_ticker_report(request: Request, payload: TickerReportRequest):
-    """
-    Развёрнутый отчёт от LLM по тикеру:
-    использует ВСЕ доступные модели + TA-индикаторы.
-    В будущем подключится новостной фон.
-    """
-    db = SyncSessionLocal()
-    try:
-        overview = _load_ticker_overview(db, payload.ticker)
-    finally:
-        db.close()
-
-    if not overview["models"]:
-        return JSONResponse(
-            status_code=404,
-            content={"error": f"Нет данных моделей для тикера {payload.ticker}"},
+        figi_row = db.execute(
+            text("SELECT figi FROM public.tickers WHERE ticker = :v OR figi = :v"),
+            {"v": ticker},
+        ).fetchone()
+        figi = figi_row[0] if figi_row else ticker
+        report = _get_or_create_today_report(
+            db, figi, overview["ticker"], overview.get("data_date")
         )
 
-    # Подтягиваем новости (с кешем 30 минут)
+        if not force and report.ta_summary_json:
+            try:
+                cached = json.loads(report.ta_summary_json)
+                return {**cached, "cached": True}
+            except Exception:
+                pass  # битый JSON → перегенерируем
+
+        result = summarize_ta_indicators(overview["ticker"], overview["ta"])
+        if result.get("error"):
+            return JSONResponse(status_code=502, content={"error": result["error"]})
+
+        from datetime import datetime as _dt
+        payload = {
+            "ticker": overview["ticker"],
+            "data_date": overview.get("data_date"),
+            "verdict": result["verdict"],
+            "strength": result["strength"],
+            "summary": result["summary"],
+            "key_indicators": result["key_indicators"],
+            "generated_at": _dt.utcnow().isoformat(),
+        }
+        report.ta_summary_json = json.dumps(payload, ensure_ascii=False, default=str)
+        report.timestamp = _dt.utcnow()
+        db.commit()
+        return {**payload, "cached": False}
+    finally:
+        db.close()
+
+
+@app.get("/api/llm/ticker-report", tags=["LLM"])
+@limiter.limit("60/hour")
+async def llm_ticker_report(request: Request, ticker: str):
+    """
+    Показывает сохранённый отчёт LLM по тикеру.
+    Отчёт формируется ночным пайплайном (2:00 МСК) и пишется в ticker_reports.
+    Эндпоинт ничего не генерирует на лету — только читает из БД, чтобы
+    нажатия кнопки не жгли токены Groq.
+    """
+    import json as _json
+    db = SyncSessionLocal()
     try:
-        news_items = fetch_news_for_ticker(overview["ticker"], max_items=5)
-    except Exception as e:
-        logger.warning(f"news fetch failed: {e}")
-        news_items = None
+        # Найдём FIGI
+        row = db.execute(
+            text("SELECT ticker, figi FROM public.tickers WHERE ticker = :v OR figi = :v"),
+            {"v": ticker},
+        ).fetchone()
+        if not row:
+            return JSONResponse(status_code=404, content={"error": "Тикер не найден"})
+        ticker_name, figi = row[0], row[1]
 
-    # Не передаём отключённые модели — они исторически плохо угадывают,
-    # их прогнозы могут только запутать LLM.
-    active_models = [m for m in overview["models"] if not m.get("is_disabled")]
+        report = (
+            db.query(TickerReport)
+            .filter(TickerReport.figi == figi)
+            .filter(TickerReport.verdict.isnot(None))  # пустые кеш-записи не показываем
+            .order_by(TickerReport.timestamp.desc())
+            .first()
+        )
 
-    report = generate_ticker_report(
-        ticker=overview["ticker"],
-        current_price=overview["current_price"] or 0.0,
-        models_data=active_models,
-        ta_indicators=overview["ta"],
-        news_items=news_items,
-        data_date=overview.get("data_date"),
-        prediction_date=overview.get("prediction_date"),
-    )
-    return report
+        if not report:
+            return JSONResponse(
+                status_code=404,
+                content={
+                    "error": "Отчёт ещё не сформирован. Будет готов после ближайшего ночного прогона (2:00 МСК).",
+                    "ticker": ticker_name,
+                },
+            )
+
+        sections = None
+        if report.sections_json:
+            try:
+                sections = _json.loads(report.sections_json)
+            except Exception:
+                sections = None
+
+        return {
+            "ticker": ticker_name,
+            "data_date": report.data_date.isoformat() if report.data_date else None,
+            "prediction_date": report.prediction_date.isoformat() if report.prediction_date else None,
+            "current_price": report.current_price,
+            "verdict": report.verdict,
+            "confidence": report.confidence,
+            "entry_price": report.entry_price,
+            "target_price": report.target_price,
+            "stop_loss": report.stop_loss,
+            "reasoning": report.reasoning,
+            "sections": sections,
+            "generated_at": report.timestamp.isoformat() if report.timestamp else None,
+        }
+    finally:
+        db.close()
 
 
 # ============================================================

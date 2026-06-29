@@ -119,6 +119,12 @@ def setup_database():
                 ("llm_signal", "VARCHAR(20)"),
                 ("llm_reasoning", "TEXT"),
                 ("llm_processed_at", "TIMESTAMP"),
+                # ticker_reports — добавляем колонки кеша LLM-ответов
+            ]
+            # отдельно для ticker_reports
+            ticker_reports_columns = [
+                ("ta_summary_json", "TEXT"),
+                ("ta_explanation_text", "TEXT"),
             ]
             for col_name, col_type in new_columns:
                 try:
@@ -128,8 +134,17 @@ def setup_database():
                     """))
                 except Exception:
                     pass  # Column might already exist
+            # ticker_reports columns
+            for col_name, col_type in ticker_reports_columns:
+                try:
+                    conn.execute(text(f"""
+                        ALTER TABLE public.ticker_reports
+                        ADD COLUMN IF NOT EXISTS {col_name} {col_type};
+                    """))
+                except Exception:
+                    pass
             conn.commit()
-            print("   ✓ New columns added")
+            print("   ✓ New columns added (model_results + ticker_reports)")
 
             # Create indexes
             print("\n3. Creating indexes...")

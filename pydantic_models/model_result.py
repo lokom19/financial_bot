@@ -94,6 +94,10 @@ class TickerReport(Base):
     models_snapshot_json = Column(Text, nullable=True)  # модели, что кормили отчёт
     ta_snapshot_json = Column(Text, nullable=True)      # значения индикаторов
 
+    # Кеш LLM-ответов (чтобы не дёргать API при каждом нажатии кнопки)
+    ta_summary_json = Column(Text, nullable=True)       # БЫЧИЙ/МЕДВЕЖИЙ + summary
+    ta_explanation_text = Column(Text, nullable=True)   # развёрнутое TA-объяснение
+
     # Факт (заполняется на следующий день после prediction_date)
     actual_close = Column(Float, nullable=True)
     actual_high = Column(Float, nullable=True)

@@ -224,13 +224,13 @@
         <div class="ai-call">
             <div class="icon">🤖</div>
             <div class="text">
-                <h2>Получить отчёт от ИИ</h2>
-                <p>Сводный анализ на основе {{ overview.models_count }} моделей, технических индикаторов{% if overview.news_count %} и новостей{% else %} и (скоро) новостей{% endif %}. С рекомендацией цены входа, цели и стоп-лосса.</p>
+                <h2>Отчёт от ИИ</h2>
+                <p>Сводный анализ на основе {{ overview.models_count }} моделей, технических индикаторов{% if overview.news_count %} и новостей{% else %} и (скоро) новостей{% endif %}. С рекомендацией цены входа, цели и стоп-лосса. Формируется ночным прогоном (2:00 МСК).</p>
             </div>
-            <button class="ai-btn" onclick="getReport()" id="ai-btn">Запросить отчёт</button>
+            <button class="ai-btn" onclick="getReport()" id="ai-btn">📊 Показать отчёт</button>
         </div>
 
-        <div class="loader" id="loader"><span class="spinner"></span>Анализирую данные через LLM…</div>
+        <div class="loader" id="loader"><span class="spinner"></span>Загружаю отчёт…</div>
 
         <div class="report" id="report"></div>
 
@@ -982,16 +982,12 @@
             reportEl.style.display = 'none';
 
             try {
-                const resp = await fetch('/api/llm/ticker-report', {
-                    method: 'POST',
-                    headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify({ ticker: TICKER }),
-                });
+                const resp = await fetch('/api/llm/ticker-report?ticker=' + encodeURIComponent(TICKER));
                 const data = await resp.json();
                 loader.classList.remove('show');
 
                 if (data.error) {
-                    reportEl.innerHTML = '<div class="err">Ошибка LLM: ' + data.error + '</div>';
+                    reportEl.innerHTML = '<div class="err">' + data.error + '</div>';
                     reportEl.style.display = 'block';
                 } else {
                     renderReport(data);
@@ -1002,7 +998,7 @@
                 reportEl.style.display = 'block';
             }
             btn.disabled = false;
-            btn.textContent = '🔁 Перезапросить';
+            btn.textContent = '📊 Показать отчёт';
         }
 
         function renderReport(d) {
