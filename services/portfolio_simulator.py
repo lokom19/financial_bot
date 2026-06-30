@@ -89,6 +89,17 @@ def simulate(engine, initial_capital: float = 100_000.0,
     equity = initial_capital
     equity_curve = []
     trades = []
+
+    # Стартовая точка кривой — день ДО первой сделки с equity = initial_capital.
+    # Без неё, когда все сделки в один день, curve состоит из 1 точки и canvas
+    # не рисует линию (только заливка тянется к углам и выглядит как падение).
+    from datetime import timedelta as _td
+    first_day = min(by_day.keys())
+    equity_curve.append({
+        "date": (first_day - _td(days=1)).isoformat(),
+        "equity": round(equity, 2),
+        "ret_pct": 0.0,
+    })
     by_ticker_stats = defaultdict(lambda: {
         "trades": 0, "wins": 0,
         "pnl_total": 0.0, "return_pct_total": 0.0,
