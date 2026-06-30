@@ -516,7 +516,7 @@ async def predictions_history(ticker: str, days: int = 90):
             text("""
                 SELECT DISTINCT ON (timestamp::date, model_name)
                     timestamp, model_name, current_price, predicted_price,
-                    trading_signal, expected_change, llm_signal
+                    trading_signal, expected_change, llm_signal, data_end_date
                 FROM public.model_results
                 WHERE db_name = :figi
                   AND timestamp::date >= :since
@@ -535,7 +535,7 @@ async def predictions_history(ticker: str, days: int = 90):
         date_to_low = {p["date"]: p["low"] for p in actual_prices}
         dates_sorted = [p["date"] for p in actual_prices]
 
-        def next_bar_after(d_str: str):
+        def first_bar_after(d_str: str):
             """
             Возвращает (date, close, high, low) для ПЕРВОГО торгового дня
             строго после d_str. Корректно обрабатывает выходные/праздники.
@@ -558,9 +558,14 @@ async def predictions_history(ticker: str, days: int = 90):
             pred = float(r[3])
             signal = r[4]
             model = r[1]
+            data_end = r[7]  # data_end_date — последняя свеча в обучении
 
-            # Проверка корректности предсказанного направления + high/low следующего дня
-            next_date, actual_next, next_high, next_low = next_bar_after(d_iso)
+            # Прогноз делается на ПЕРВЫЙ торговый день после data_end_date,
+            # а не после timestamp прогона. Это критично: nightly бежит в 2:00
+            # ночи D, использует свечу D-1 и целится в D — мы должны искать
+            # actual_close именно на D, иначе зачёт сдвигается на день вперёд.
+            anchor = data_end.isoformat() if data_end else d_iso
+            next_date, actual_next, next_high, next_low = first_bar_after(anchor)
             correct = None
             if actual_next is not None:
                 pred_up = pred > cur
