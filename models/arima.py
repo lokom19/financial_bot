@@ -156,8 +156,12 @@ def find_optimal_arima_params(series, d, max_p=MAX_P, max_q=MAX_Q):
     best_aic = float('inf')
     best_params = None
 
-    # First try simple models (more efficient)
-    simple_models = [(0,d,0), (1,d,0), (0,d,1), (1,d,1)]
+    # Пропускаем (0,d,0) — это чистый random walk без AR/MA компонент,
+    # т.е. forecast = last observation. На шумных дневных ценах AIC для
+    # него часто минимален (0 параметров), и модель "выигрывает", но
+    # выдаёт expected_change = 0.00% каждый раз. Нам нужна модель,
+    # которая ХОТЬ ЧТО-ТО предсказывает, поэтому требуем p >= 1 или q >= 1.
+    simple_models = [(1,d,0), (0,d,1), (1,d,1)]
 
     for order in simple_models:
         try:
@@ -178,6 +182,8 @@ def find_optimal_arima_params(series, d, max_p=MAX_P, max_q=MAX_Q):
     # Try more complex models
     for p in range(max_p + 1):
         for q in range(max_q + 1):
+            if p == 0 and q == 0:
+                continue  # см. комментарий выше — random walk не даёт прогноза
             # Skip already tried models
             if (p,d,q) in simple_models:
                 continue
