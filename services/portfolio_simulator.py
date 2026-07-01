@@ -229,6 +229,12 @@ def simulate(engine, initial_capital: float = 100_000.0,
     best = max((t["net_return_pct"] for t in trades), default=None)
     worst = min((t["net_return_pct"] for t in trades), default=None)
 
+    # Разбивка по причине выхода — диагностика качества LLM-уровней.
+    # Много "close" = уровни слишком широкие, ни цель ни стоп не сработали.
+    n_target = sum(1 for t in trades if t["exit_reason"] == "target")
+    n_stop = sum(1 for t in trades if t["exit_reason"] == "stop")
+    n_close = sum(1 for t in trades if t["exit_reason"] == "close")
+
     summary = {
         "initial_capital": initial_capital,
         "final_equity": round(equity, 2),
@@ -240,6 +246,14 @@ def simulate(engine, initial_capital: float = 100_000.0,
         "worst_trade_pct": worst,
         "commission_pct": commission_pct,
         "days_simulated": len(equity_curve),
+        "exits": {
+            "target": n_target,
+            "stop": n_stop,
+            "close": n_close,
+            "target_rate_pct": round(n_target / n_trades * 100, 1) if n_trades else None,
+            "stop_rate_pct": round(n_stop / n_trades * 100, 1) if n_trades else None,
+            "close_rate_pct": round(n_close / n_trades * 100, 1) if n_trades else None,
+        },
     }
 
     # Финальная статистика по тикерам

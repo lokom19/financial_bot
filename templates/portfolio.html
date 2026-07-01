@@ -281,6 +281,20 @@
                 <span class="lbl">Худшая сделка</span>
                 <span class="val red">${fmtPct(s.worst_trade_pct)}</span>
             </div>
+            ${s.exits ? `
+            <div class="summ-item" title="Из скольких сделок цена дошла до цели / стопа / вышла по close">
+                <span class="lbl">Причины выхода</span>
+                <span class="val" style="font-size:15px;line-height:1.4">
+                    <span class="green">🎯 ${s.exits.target}</span> /
+                    <span class="red">🛑 ${s.exits.stop}</span> /
+                    <span style="color:#64748b">⏱ ${s.exits.close}</span>
+                </span>
+                <span class="sub">
+                    цель ${s.exits.target_rate_pct ?? 0}% ·
+                    стоп ${s.exits.stop_rate_pct ?? 0}% ·
+                    close ${s.exits.close_rate_pct ?? 0}%
+                </span>
+            </div>` : ''}
         </div>`;
     }
 
