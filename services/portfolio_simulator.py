@@ -152,44 +152,41 @@ def simulate(engine, initial_capital: float = 100_000.0,
             high = float(actual_high) if actual_high is not None else float(actual_close)
             low = float(actual_low) if actual_low is not None else float(actual_close)
 
-            # Валидные значения target/stop относительно entry_p.
-            # LLM иногда путает: указывает stop ниже entry для SELL или
-            # выше entry для BUY — такой "стоп" физически не защитный.
-            # Игнорируем такие числа, чтобы не засчитывать фиктивные выходы.
             def _v(x):
                 return float(x) if x is not None and float(x) > 0 else None
             target_v = _v(target)
             stop_v = _v(stop)
 
-            if verdict == "BUY":
-                # BUY: цель ВЫШЕ входа, стоп НИЖЕ
-                if target_v is not None and target_v <= entry_p:
-                    target_v = None
-                if stop_v is not None and stop_v >= entry_p:
-                    stop_v = None
-                if stop_v is not None and low <= stop_v:
-                    close_price = stop_v
-                    exit_reason = "stop"
-                elif target_v is not None and high >= target_v:
-                    close_price = target_v
-                    exit_reason = "target"
+            # Уровень считается сработавшим только если цена ФИЗИЧЕСКИ его коснулась
+            # внутри дневного диапазона. Направление проверки зависит от того,
+            # где уровень относительно входа — а не от его лейбла "цель/стоп"
+            # (LLM иногда путает, ставит "стоп" ниже входа для SELL и т.п.).
+            def _touched(level: float) -> bool:
+                if level > entry_p:
+                    return high >= level      # цена росла и достигла уровня
+                if level < entry_p:
+                    return low <= level       # цена падала и достигла уровня
+                return True                   # уровень == entry — сразу выходим
+            tgt_hit = target_v is not None and _touched(target_v)
+            stop_hit_ = stop_v is not None and _touched(stop_v)
+
+            if tgt_hit and stop_hit_:
+                # Оба уровня коснулись за день. Не зная intraday-порядка,
+                # берём тот, что ближе ко входу (обычно срабатывает раньше).
+                if abs(stop_v - entry_p) < abs(target_v - entry_p):
+                    close_price, exit_reason = stop_v, "stop"
                 else:
-                    close_price = float(actual_close)
+                    close_price, exit_reason = target_v, "target"
+            elif tgt_hit:
+                close_price, exit_reason = target_v, "target"
+            elif stop_hit_:
+                close_price, exit_reason = stop_v, "stop"
+            else:
+                close_price = float(actual_close)
+
+            if verdict == "BUY":
                 gross_return_pct = (close_price - entry_p) / entry_p * 100
             else:  # SELL
-                # SELL: цель НИЖЕ входа, стоп ВЫШЕ
-                if target_v is not None and target_v >= entry_p:
-                    target_v = None
-                if stop_v is not None and stop_v <= entry_p:
-                    stop_v = None
-                if stop_v is not None and high >= stop_v:
-                    close_price = stop_v
-                    exit_reason = "stop"
-                elif target_v is not None and low <= target_v:
-                    close_price = target_v
-                    exit_reason = "target"
-                else:
-                    close_price = float(actual_close)
                 gross_return_pct = (entry_p - close_price) / entry_p * 100
 
             # Round-trip комиссия (вход + выход)
