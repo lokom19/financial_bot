@@ -429,11 +429,32 @@ live-точности (модели с last30d >= 55% имеют вес 2x, с <
 РЕКОМЕНДАЦИЯ:
 <1 предложение: конкретное действие со ссылкой на ценовые уровни>
 
-ПРАВИЛА ДЛЯ ЦЕН:
-- ЦЕНА ВХОДА — около текущей цены или чуть лучше (для BUY — равно или ниже; для SELL — равно или выше).
-- ЦЕЛЕВАЯ ЦЕНА: для BUY — выше текущей на 2-7%; для SELL — ниже на 2-7%; для HOLD — равна текущей.
-- СТОП-ЛОСС: для BUY — на 1.5-3% ниже цены входа; для SELL — на 1.5-3% выше; для HOLD — поставь 0.
-- Указывай числа в той же валюте/масштабе, что и текущая цена. Без знаков $ и %, только число.
+ПРАВИЛА ДЛЯ ЦЕН (прогноз на 1 торговый день!):
+Прогноз на 1 день — движение обычно 0.3-1.5%. Не ставь широкие уровни.
+
+Для BUY (лонг, ждём рост):
+  ЦЕНА ВХОДА  = текущая цена (можно на 0.1-0.3% ниже)
+  ЦЕЛЕВАЯ ЦЕНА > ЦЕНА ВХОДА  (на 0.5-1.5% ВЫШЕ входа)
+  СТОП-ЛОСС   < ЦЕНА ВХОДА   (на 0.5-1.0% НИЖЕ входа)
+
+Для SELL (шорт, ждём падение):
+  ЦЕНА ВХОДА  = текущая цена (можно на 0.1-0.3% выше)
+  ЦЕЛЕВАЯ ЦЕНА < ЦЕНА ВХОДА  (на 0.5-1.5% НИЖЕ входа)
+  СТОП-ЛОСС   > ЦЕНА ВХОДА   (на 0.5-1.0% ВЫШЕ входа) ⚠️ ВНИМАНИЕ: для шорта стоп ВЫШЕ входа!
+
+Для HOLD:  все три цены = текущей.
+
+ПРИМЕР для SELL при цене 3440:
+  ЦЕНА ВХОДА: 3440
+  ЦЕЛЕВАЯ ЦЕНА: 3405   (~1% ниже)
+  СТОП-ЛОСС: 3470     (~1% выше)
+
+ПРИМЕР для BUY при цене 300:
+  ЦЕНА ВХОДА: 300
+  ЦЕЛЕВАЯ ЦЕНА: 303   (~1% выше)
+  СТОП-ЛОСС: 297.5    (~1% ниже)
+
+Указывай числа в той же валюте/масштабе, что и текущая цена. Без знаков $ и %, только число.
 
 Пиши на русском. Без markdown, эмодзи, заголовков типа ##. Только текст и метки разделов как показано."""
 
@@ -626,6 +647,39 @@ def generate_ticker_report(
     # подставляем текущую цену, иначе в UI болтается "—"
     if entry_price is None and verdict in ("BUY", "SELL") and current_price:
         entry_price = float(current_price)
+
+    # Пост-валидация target/stop: LLM (особенно 8B) регулярно путает стороны.
+    # Пример реального случая: SELL entry=3440, target=3230, stop=3300 —
+    # стоп под входом = защита не работает. Кроме того, LLM часто ставит
+    # цели по 5-7% на дневной бар (нереалистично).
+    if entry_price and verdict in ("BUY", "SELL"):
+        entry_price = float(entry_price)
+        MAX_MOVE_PCT = 1.5   # реалистичный дневной ход
+        STOP_MOVE_PCT = 1.0
+
+        # Где по правилам должен стоять уровень относительно entry
+        if verdict == "BUY":
+            target_above, stop_above = True, False
+        else:  # SELL
+            target_above, stop_above = False, True
+
+        def _wrong_side(x, must_be_above):
+            if x is None:
+                return False
+            if must_be_above:
+                return x <= entry_price
+            return x >= entry_price
+
+        def _too_wide(x):
+            return x is not None and abs(x - entry_price) / entry_price > 0.03
+
+        def _default_level(above, pct):
+            return entry_price * (1 + pct / 100) if above else entry_price * (1 - pct / 100)
+
+        if _wrong_side(target_price, target_above) or _too_wide(target_price):
+            target_price = round(_default_level(target_above, MAX_MOVE_PCT), 2)
+        if _wrong_side(stop_loss, stop_above) or _too_wide(stop_loss):
+            stop_loss = round(_default_level(stop_above, STOP_MOVE_PCT), 2)
 
     return {
         "verdict": verdict,
