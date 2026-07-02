@@ -23,11 +23,11 @@ conn = psycopg2.connect(
 cur = conn.cursor()
 
 cur.execute("""
-    SELECT id, report_date, verdict, current_price, entry_price,
+    SELECT id, prediction_date, verdict, current_price, entry_price,
            target_price, stop_loss, actual_close, actual_high, actual_low
     FROM public.ticker_reports
     WHERE ticker = 'OZON'
-    ORDER BY report_date DESC
+    ORDER BY timestamp DESC
     LIMIT 1
 """)
 row = cur.fetchone()
@@ -40,8 +40,8 @@ if not row:
  actual_close, actual_high, actual_low) = row
 
 print("=== Текущая запись ===")
-print(f"  id            : {rid}")
-print(f"  date          : {rdate}")
+print(f"  id              : {rid}")
+print(f"  prediction_date : {rdate}")
 print(f"  verdict       : {verdict}")
 print(f"  current_price : {cur_price}")
 print(f"  entry_price   : {entry}")
