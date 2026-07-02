@@ -170,30 +170,46 @@ def resolve_ticker_reports(engine):
             cur = float(cur_price) if cur_price else None
             anchor = entry_p or cur
 
+            # Fill-check: сделка открывается только если цена в течение
+            # дня реально дошла до entry_price. Если нет — метка направления
+            # остаётся NULL (UI покажет "цена входа не достигнута").
+            entry_reached = None
+            if anchor and verdict in ("BUY", "SELL") and high_p is not None and low_p is not None:
+                if verdict == "BUY":
+                    entry_reached = low_p <= anchor
+                else:  # SELL
+                    entry_reached = high_p >= anchor
+
             # Корректность направления
             correct = None
             if anchor and verdict in ("BUY", "SELL"):
-                actual_up = close_p > anchor
-                correct = (verdict == "BUY" and actual_up) or \
-                          (verdict == "SELL" and not actual_up)
+                if entry_reached is False:
+                    # цена входа не достигнута — сделка не открылась
+                    correct = None
+                else:
+                    actual_up = close_p > anchor
+                    correct = (verdict == "BUY" and actual_up) or \
+                              (verdict == "SELL" and not actual_up)
             elif verdict == "HOLD" and anchor and high_p and low_p:
                 # HOLD: считаем "корректно", если цена осталась в узком диапазоне ±0.5%
                 drift = abs(close_p - anchor) / anchor if anchor else 1.0
                 correct = drift <= 0.005
 
-            # target_hit / stop_hit (только следующий день, как договорились)
+            # target_hit / stop_hit (только следующий день, как договорились).
+            # Если сделка не открылась (entry_reached=False) — уровни не оцениваем.
             target_hit = None
             stop_hit = None
-            if tgt and high_p is not None and low_p is not None:
-                if verdict == "BUY":
-                    target_hit = high_p >= float(tgt)
-                elif verdict == "SELL":
-                    target_hit = low_p <= float(tgt)
-            if stop and high_p is not None and low_p is not None:
-                if verdict == "BUY":
-                    stop_hit = low_p <= float(stop)
-                elif verdict == "SELL":
-                    stop_hit = high_p >= float(stop)
+            if entry_reached is not False:
+                if tgt and high_p is not None and low_p is not None:
+                    if verdict == "BUY":
+                        target_hit = high_p >= float(tgt)
+                    elif verdict == "SELL":
+                        target_hit = low_p <= float(tgt)
+                if stop and high_p is not None and low_p is not None:
+                    if verdict == "BUY":
+                        stop_hit = low_p <= float(stop)
+                    elif verdict == "SELL":
+                        stop_hit = high_p >= float(stop)
 
             session.execute(text("""
                 UPDATE public.ticker_reports

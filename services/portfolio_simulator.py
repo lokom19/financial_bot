@@ -138,11 +138,6 @@ def simulate(engine, initial_capital: float = 100_000.0,
             if entry_p <= 0:
                 continue
 
-            # Определяем цену выхода с учётом стопа/цели:
-            # - Для BUY: long — если high >= target → закрываемся по target
-            #            если low <= stop → закрываемся по stop
-            #            иначе — по actual_close
-            # - Для SELL: short — наоборот
             close_price = None
             exit_reason = "close"
 
@@ -151,6 +146,17 @@ def simulate(engine, initial_capital: float = 100_000.0,
 
             high = float(actual_high) if actual_high is not None else float(actual_close)
             low = float(actual_low) if actual_low is not None else float(actual_close)
+
+            # Fill-check: сделка открывается только если цена в течение дня
+            # реально дошла до entry_price. Как limit-заявка у брокера:
+            # - BUY (лимит-покупка): нужно чтобы low <= entry
+            # - SELL (лимит-продажа): нужно чтобы high >= entry
+            # Если fill не произошёл — пользователь не купил/продал ничего,
+            # такая "сделка" не должна попадать в статистику.
+            filled = (verdict == "BUY" and low <= entry_p) or \
+                     (verdict == "SELL" and high >= entry_p)
+            if not filled:
+                continue
 
             def _v(x):
                 return float(x) if x is not None and float(x) > 0 else None

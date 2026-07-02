@@ -776,8 +776,15 @@
                 if (v === 'HOLD') return '<span class="x-pill x-pill-warning">HOLD</span>';
                 return `<span class="x-pill x-pill-muted">${v || 'UNKNOWN'}</span>`;
             };
-            const directionBadge = (cd) => {
-                if (cd === null || cd === undefined) return '<span class="x-pill x-pill-muted">⏳ ждём</span>';
+            const directionBadge = (cd, it) => {
+                // Если сделка не открылась (fill не случился) — actual_close есть,
+                // а correct_direction=NULL и вердикт направленный: отдельный лейбл.
+                if (cd === null || cd === undefined) {
+                    if (it && it.actual_close !== null && (it.verdict === 'BUY' || it.verdict === 'SELL')) {
+                        return '<span class="x-pill x-pill-muted" title="Цена не дошла до entry_price — заявка не сработала">цена входа не достигнута</span>';
+                    }
+                    return '<span class="x-pill x-pill-muted">⏳ ждём</span>';
+                }
                 return cd ? '<span class="x-pill x-pill-success">✓ корректно</span>'
                           : '<span class="x-pill x-pill-danger">✗ некорректно</span>';
             };
@@ -831,7 +838,7 @@
                     <td class="right" style="color: var(--danger);">${fmt(it.stop_loss)}</td>
                     <td class="right">${it.actual_close === null ? '<span class="text-mute">—</span>' : it.actual_close.toFixed(2)}</td>
                     <td class="right" style="font-size:12px;">${hlCell}</td>
-                    <td class="center">${directionBadge(it.correct_direction)}</td>
+                    <td class="center">${directionBadge(it.correct_direction, it)}</td>
                     <td class="center">${hitBadge(it.target_hit)}</td>
                     <td class="center">${hitBadge(it.stop_hit)}</td>
                 </tr>`;

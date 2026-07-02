@@ -24,9 +24,18 @@ def main():
     )
     engine = create_engine(url)
     with engine.begin() as conn:
+        # Fill-check: сделка открылась, только если цена реально достигла
+        # entry_price в течение дня (для BUY: low<=entry, для SELL: high>=entry).
+        # Если нет — correct_direction=NULL (UI: "цена входа не достигнута").
         result = conn.execute(text("""
             UPDATE public.ticker_reports
             SET correct_direction = CASE
+                -- BUY: fill требует low <= entry
+                WHEN verdict = 'BUY' AND actual_low IS NOT NULL
+                     AND actual_low > COALESCE(entry_price, current_price) THEN NULL
+                -- SELL: fill требует high >= entry
+                WHEN verdict = 'SELL' AND actual_high IS NOT NULL
+                     AND actual_high < COALESCE(entry_price, current_price) THEN NULL
                 WHEN verdict = 'BUY'  AND actual_close > COALESCE(entry_price, current_price) THEN true
                 WHEN verdict = 'SELL' AND actual_close < COALESCE(entry_price, current_price) THEN true
                 WHEN verdict IN ('BUY','SELL') THEN false
