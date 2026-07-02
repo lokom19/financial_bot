@@ -140,13 +140,13 @@ def resolve_ticker_reports(engine):
         # Берём все отчёты без actual_close
         rows = session.execute(text("""
             SELECT id, figi, prediction_date, current_price, verdict,
-                   target_price, stop_loss
+                   target_price, stop_loss, entry_price
             FROM public.ticker_reports
             WHERE actual_close IS NULL
               AND prediction_date IS NOT NULL
         """)).fetchall()
         for r in rows:
-            rep_id, figi, pred_date, cur_price, verdict, tgt, stop = r
+            rep_id, figi, pred_date, cur_price, verdict, tgt, stop, entry_p = r
             # Ищем свечу за prediction_date (или ближайшую следующую)
             bar = session.execute(text(f"""
                 SELECT timestamp::date, close, high, low
@@ -161,17 +161,24 @@ def resolve_ticker_reports(engine):
             close_p = float(close_p)
             high_p = float(high_p) if high_p is not None else None
             low_p = float(low_p) if low_p is not None else None
+            # Опорная цена для оценки направления — entry_price (та, что LLM
+            # назвала "ценой входа"). Если не задана — фолбэк на current_price
+            # (цена на момент отчёта). Иначе бывают ситуации типа
+            # "BUY вход 3400, close 3421 (рост) → correct=False", потому что
+            # на момент отчёта current_price было выше entry.
+            entry_p = float(entry_p) if entry_p else None
             cur = float(cur_price) if cur_price else None
+            anchor = entry_p or cur
 
             # Корректность направления
             correct = None
-            if cur and verdict in ("BUY", "SELL"):
-                actual_up = close_p > cur
+            if anchor and verdict in ("BUY", "SELL"):
+                actual_up = close_p > anchor
                 correct = (verdict == "BUY" and actual_up) or \
                           (verdict == "SELL" and not actual_up)
-            elif verdict == "HOLD" and cur and high_p and low_p:
+            elif verdict == "HOLD" and anchor and high_p and low_p:
                 # HOLD: считаем "корректно", если цена осталась в узком диапазоне ±0.5%
-                drift = abs(close_p - cur) / cur if cur else 1.0
+                drift = abs(close_p - anchor) / anchor if anchor else 1.0
                 correct = drift <= 0.005
 
             # target_hit / stop_hit (только следующий день, как договорились)
