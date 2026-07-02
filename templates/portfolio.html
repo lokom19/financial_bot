@@ -273,6 +273,11 @@
                 <span class="val ${wrClass}">${s.win_rate_pct === null ? '—' : s.win_rate_pct + '%'}</span>
                 <span class="sub">прибыльных: ${s.winning_trades}/${s.trades}</span>
             </div>
+            <div class="summ-item" title="Сколько раз цена закрылась в нашу сторону от цены входа (даже если вышли по стопу)">
+                <span class="lbl">Точность направления</span>
+                <span class="val ${s.direction_accuracy_pct === null ? '' : (s.direction_accuracy_pct >= 55 ? 'green' : (s.direction_accuracy_pct <= 45 ? 'red' : 'amber'))}">${s.direction_accuracy_pct === null ? '—' : s.direction_accuracy_pct + '%'}</span>
+                <span class="sub">верных: ${s.correct_direction_trades ?? 0}/${s.trades}</span>
+            </div>
             <div class="summ-item">
                 <span class="lbl">Лучшая сделка</span>
                 <span class="val green">${fmtPct(s.best_trade_pct)}</span>
@@ -379,14 +384,17 @@
         }
         let html = '<div class="trades-card"><h3>📊 По тикерам</h3><table class="x-table"><thead><tr>'
             + '<th>Тикер</th><th class="right">Сделок</th><th class="right">Win Rate</th>'
+            + '<th class="right" title="Цена закрылась в нашу сторону от входа">Направление</th>'
             + '<th class="right">Средняя доходность</th><th class="right">P&L, ₽</th></tr></thead><tbody>';
         for (const [ticker, st] of Object.entries(byTicker)) {
             const wrCls = st.win_rate_pct >= 55 ? 'text-success' : (st.win_rate_pct <= 45 ? 'text-danger' : '');
+            const dirCls = st.direction_accuracy_pct === null ? '' : (st.direction_accuracy_pct >= 55 ? 'text-success' : (st.direction_accuracy_pct <= 45 ? 'text-danger' : ''));
             const pnlCls = st.pnl_rub > 0 ? 'text-success' : (st.pnl_rub < 0 ? 'text-danger' : '');
             html += `<tr>
                 <td><b>${ticker}</b></td>
                 <td class="right">${st.trades}</td>
                 <td class="right ${wrCls}">${st.win_rate_pct === null ? '—' : st.win_rate_pct + '%'}</td>
+                <td class="right ${dirCls}">${st.direction_accuracy_pct === null ? '—' : st.direction_accuracy_pct + '%'}</td>
                 <td class="right ${st.avg_return_pct >= 0 ? 'text-success' : 'text-danger'}">${fmtPct(st.avg_return_pct)}</td>
                 <td class="right ${pnlCls}">${fmtRub(st.pnl_rub)}</td>
             </tr>`;
@@ -404,6 +412,7 @@
         let html = '<table class="x-table"><thead><tr>'
             + '<th>Дата</th><th>Тикер</th><th>Вердикт</th>'
             + '<th class="right">Вход</th><th class="right">Выход</th><th>Причина</th>'
+            + '<th class="right" title="Цена закрылась в нашу сторону от входа">Направление</th>'
             + '<th class="right">Доход %</th><th class="right">P&L, ₽</th>'
             + '<th class="right">Капитал в сделке</th></tr></thead><tbody>';
         // показываем последние 100 сделок в обратном порядке (свежие сверху)
@@ -415,6 +424,8 @@
                 'stop': '🛑 стоп',
                 'close': 'close',
             };
+            const dirLabel = t.correct_direction === true ? '<span class="text-success">✓</span>'
+                           : t.correct_direction === false ? '<span class="text-danger">✗</span>' : '—';
             html += `<tr>
                 <td><span class="text-mute">${t.date}</span></td>
                 <td><b>${t.ticker}</b></td>
@@ -422,6 +433,7 @@
                 <td class="right">${t.entry_price.toFixed(2)}</td>
                 <td class="right">${t.exit_price.toFixed(2)}</td>
                 <td><span class="exit-reason">${exitLabels[t.exit_reason] || t.exit_reason}</span></td>
+                <td class="right">${dirLabel}</td>
                 <td class="right ${t.net_return_pct >= 0 ? 'text-success' : 'text-danger'}">${fmtPct(t.net_return_pct)}</td>
                 <td class="right ${pnlCls}">${fmtRub(t.pnl_rub)}</td>
                 <td class="right text-mute">${t.capital_at_trade.toLocaleString('ru-RU', {maximumFractionDigits:0})} ₽</td>

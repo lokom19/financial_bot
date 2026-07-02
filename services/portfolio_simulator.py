@@ -101,7 +101,7 @@ def simulate(engine, initial_capital: float = 100_000.0,
         "ret_pct": 0.0,
     })
     by_ticker_stats = defaultdict(lambda: {
-        "trades": 0, "wins": 0,
+        "trades": 0, "wins": 0, "correct_dir": 0,
         "pnl_total": 0.0, "return_pct_total": 0.0,
     })
 
@@ -200,6 +200,15 @@ def simulate(engine, initial_capital: float = 100_000.0,
             pnl_rub = per_trade_capital * net_return_pct / 100.0
             day_pnl += pnl_rub
 
+            # Направление верно, если цена закрылась по нашей стороне от входа.
+            # Это не зависит от того, вышли ли мы по стопу — стоп мог сработать
+            # внутри дня, но цена к закрытию всё равно ушла в нужную сторону.
+            actual_close_f = float(actual_close)
+            if verdict == "BUY":
+                dir_correct = actual_close_f >= entry_p
+            else:
+                dir_correct = actual_close_f <= entry_p
+
             trades.append({
                 "date": trade_date.isoformat(),
                 "ticker": ticker,
@@ -212,6 +221,7 @@ def simulate(engine, initial_capital: float = 100_000.0,
                 "net_return_pct": round(net_return_pct, 2),
                 "pnl_rub": round(pnl_rub, 2),
                 "capital_at_trade": round(per_trade_capital, 2),
+                "correct_direction": dir_correct,
             })
 
             # Статистика по тикеру
@@ -219,6 +229,8 @@ def simulate(engine, initial_capital: float = 100_000.0,
             st["trades"] += 1
             if net_return_pct > 0:
                 st["wins"] += 1
+            if dir_correct:
+                st["correct_dir"] += 1
             st["pnl_total"] += pnl_rub
             st["return_pct_total"] += net_return_pct
 
@@ -232,6 +244,7 @@ def simulate(engine, initial_capital: float = 100_000.0,
     # Сводка
     n_trades = len(trades)
     winning = sum(1 for t in trades if t["net_return_pct"] > 0)
+    correct_dir_total = sum(1 for t in trades if t["correct_direction"])
     best = max((t["net_return_pct"] for t in trades), default=None)
     worst = min((t["net_return_pct"] for t in trades), default=None)
 
@@ -248,6 +261,8 @@ def simulate(engine, initial_capital: float = 100_000.0,
         "trades": n_trades,
         "winning_trades": winning,
         "win_rate_pct": round(winning / n_trades * 100, 1) if n_trades else None,
+        "correct_direction_trades": correct_dir_total,
+        "direction_accuracy_pct": round(correct_dir_total / n_trades * 100, 1) if n_trades else None,
         "best_trade_pct": best,
         "worst_trade_pct": worst,
         "commission_pct": commission_pct,
@@ -269,6 +284,8 @@ def simulate(engine, initial_capital: float = 100_000.0,
             "trades": st["trades"],
             "wins": st["wins"],
             "win_rate_pct": round(st["wins"] / st["trades"] * 100, 1) if st["trades"] else None,
+            "correct_dir": st["correct_dir"],
+            "direction_accuracy_pct": round(st["correct_dir"] / st["trades"] * 100, 1) if st["trades"] else None,
             "pnl_rub": round(st["pnl_total"], 2),
             "avg_return_pct": round(st["return_pct_total"] / st["trades"], 2) if st["trades"] else None,
         }
