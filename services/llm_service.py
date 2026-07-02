@@ -522,14 +522,19 @@ def generate_ticker_report(
                 weight = 0.5
             weighted_signals[sig] = weighted_signals.get(sig, 0.0) + weight
 
-            # Форматируем строку с приоритетом на live-точность
+            # Форматируем строку с приоритетом на live-точность.
+            # Всегда показываем реальные цифры (даже при n=1), но помечаем
+            # ненадёжные — иначе LLM пишет "LIVE отсутствует" при n<3,
+            # хотя данные в UI реально есть.
             live_part = ""
-            if hit30 is not None and n30 >= 3:
-                live_part = f", 🔥 LIVE last30d={hit30:.0f}% ({n30} прогн.)"
-                if hit5 is not None and n5 >= 2:
-                    live_part += f", last5d={hit5:.0f}%"
+            if hit30 is not None and n30 > 0:
+                live_part = f", 🔥 LIVE last30d={hit30:.0f}% (n={n30})"
+                if n30 < 3:
+                    live_part += " ⚠мало"
+                if hit5 is not None and n5 >= 1:
+                    live_part += f", last5d={hit5:.0f}% (n={n5})"
             else:
-                live_part = ", LIVE: нет статистики"
+                live_part = ", LIVE: нет прогнозов"
 
             # Формируем строку: главное — Direction и LIVE, R² показываем мелко
             lines.append(
@@ -660,8 +665,13 @@ def generate_ticker_report(
     # цели по 5-7% на дневной бар (нереалистично).
     if entry_price and verdict in ("BUY", "SELL"):
         entry_price = float(entry_price)
-        MAX_MOVE_PCT = 1.5   # реалистичный дневной ход
-        STOP_MOVE_PCT = 1.0
+        # Стоп ставим шире, чем цель, чтобы шумное дневное движение
+        # (типичный дневной range для российских акций 3-5%) не выбивало
+        # из позиции при движении цены в НАШУ сторону по closing basis.
+        MAX_MOVE_PCT = 1.5           # цель — реалистичное дневное движение
+        STOP_MOVE_PCT = 2.5          # стоп — с запасом на внутридневной шум
+        MAX_TARGET_WIDTH = 0.03      # >3% для цели — за 1 день недостижимо
+        MAX_STOP_WIDTH = 0.06        # для стопа допускаем шире
 
         # Где по правилам должен стоять уровень относительно entry
         if verdict == "BUY":
@@ -676,15 +686,15 @@ def generate_ticker_report(
                 return x <= entry_price
             return x >= entry_price
 
-        def _too_wide(x):
-            return x is not None and abs(x - entry_price) / entry_price > 0.03
+        def _too_wide(x, limit):
+            return x is not None and abs(x - entry_price) / entry_price > limit
 
         def _default_level(above, pct):
             return entry_price * (1 + pct / 100) if above else entry_price * (1 - pct / 100)
 
-        if _wrong_side(target_price, target_above) or _too_wide(target_price):
+        if _wrong_side(target_price, target_above) or _too_wide(target_price, MAX_TARGET_WIDTH):
             target_price = round(_default_level(target_above, MAX_MOVE_PCT), 2)
-        if _wrong_side(stop_loss, stop_above) or _too_wide(stop_loss):
+        if _wrong_side(stop_loss, stop_above) or _too_wide(stop_loss, MAX_STOP_WIDTH):
             stop_loss = round(_default_level(stop_above, STOP_MOVE_PCT), 2)
 
     return {
