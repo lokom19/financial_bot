@@ -689,12 +689,15 @@ def generate_ticker_report(
         def _too_wide(x, limit):
             return x is not None and abs(x - entry_price) / entry_price > limit
 
+        def _too_narrow(x, min_pct):
+            return x is not None and abs(x - entry_price) / entry_price < min_pct / 100
+
         def _default_level(above, pct):
             return entry_price * (1 + pct / 100) if above else entry_price * (1 - pct / 100)
 
         if _wrong_side(target_price, target_above) or _too_wide(target_price, MAX_TARGET_WIDTH):
             target_price = round(_default_level(target_above, MAX_MOVE_PCT), 2)
-        if _wrong_side(stop_loss, stop_above) or _too_wide(stop_loss, MAX_STOP_WIDTH):
+        if _wrong_side(stop_loss, stop_above) or _too_wide(stop_loss, MAX_STOP_WIDTH) or _too_narrow(stop_loss, STOP_MOVE_PCT):
             stop_loss = round(_default_level(stop_above, STOP_MOVE_PCT), 2)
 
     return {
