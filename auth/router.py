@@ -137,7 +137,7 @@ async def register_page(request: Request):
 
 
 @router.post("/register", response_class=HTMLResponse)
-@limiter.limit("3/hour")
+@limiter.limit("10/hour")
 async def register(
     request: Request,
     username: str = Form(...),
@@ -269,7 +269,7 @@ async def verify(
 
 
 @router.post("/resend-verification")
-@limiter.limit("3/hour")
+@limiter.limit("10/hour")
 async def resend_verification(request: Request, email: str = Form(...)):
     from main import get_db_session
     db = get_db_session()
@@ -302,7 +302,7 @@ async def forgot_password_page(request: Request):
 
 
 @router.post("/forgot-password", response_class=HTMLResponse)
-@limiter.limit("3/hour")
+@limiter.limit("10/hour")
 async def forgot_password(request: Request, email: str = Form(...)):
     from main import get_db_session
     db = get_db_session()
