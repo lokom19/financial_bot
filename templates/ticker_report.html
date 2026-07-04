@@ -803,6 +803,7 @@
                 <th class="center">Уверенность</th>
                 <th class="right">Вход</th>
                 <th class="right">Цель</th>
+                <th class="right" title="Цена реального исполнения limit-заявки: для целей >0.5% сдвинута на 0.3% ближе к входу — гарантирует срабатывание без точного касания цели LLM">Цель исп.</th>
                 <th class="right">Стоп</th>
                 <th class="right">Факт (close)</th>
                 <th class="right" title="High и Low дня прогноза">High / Low</th>
@@ -835,6 +836,7 @@
                     <td class="center"><span class="text-mute">${it.confidence || '—'}</span></td>
                     <td class="right">${fmt(it.entry_price)}</td>
                     <td class="right" style="color: var(--success);">${fmt(it.target_price)}</td>
+                    <td class="right" style="color: var(--text-muted); font-size:12px;">${fmt(it.target_execution)}</td>
                     <td class="right" style="color: var(--danger);">${fmt(it.stop_loss)}</td>
                     <td class="right">${it.actual_close === null ? '<span class="text-mute">—</span>' : it.actual_close.toFixed(2)}</td>
                     <td class="right" style="font-size:12px;">${hlCell}</td>

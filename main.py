@@ -655,6 +655,22 @@ async def ai_reports_history(ticker: str, days: int = 60):
 
         items = []
         for r in reports:
+            entry_p = float(r[7]) if r[7] is not None else None
+            target_p = float(r[8]) if r[8] is not None else None
+            # target_execution — цена, по которой симулятор реально пытается
+            # закрыться (см. execution buffer в services/portfolio_simulator.py).
+            # Для целей > 0.5% выходим на 0.3% ближе к entry — чтобы limit-заявка
+            # гарантированно исполнилась, не завися от точного касания.
+            target_exec = None
+            if entry_p and target_p and r[5] in ("BUY", "SELL"):
+                move_pct = abs(target_p - entry_p) / entry_p * 100
+                if move_pct > 0.5:
+                    if r[5] == "BUY":
+                        target_exec = round(target_p * 0.997, 2)
+                    else:
+                        target_exec = round(target_p * 1.003, 2)
+                else:
+                    target_exec = target_p
             items.append({
                 "id": r[0],
                 "timestamp": r[1].isoformat() if r[1] else None,
@@ -663,8 +679,9 @@ async def ai_reports_history(ticker: str, days: int = 60):
                 "current_price": float(r[4]) if r[4] is not None else None,
                 "verdict": r[5],
                 "confidence": r[6],
-                "entry_price": float(r[7]) if r[7] is not None else None,
-                "target_price": float(r[8]) if r[8] is not None else None,
+                "entry_price": entry_p,
+                "target_price": target_p,
+                "target_execution": target_exec,
                 "stop_loss": float(r[9]) if r[9] is not None else None,
                 "reasoning": r[10],
                 "actual_close": float(r[11]) if r[11] is not None else None,

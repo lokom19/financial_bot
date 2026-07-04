@@ -163,12 +163,19 @@ def simulate(engine, initial_capital: float = 100_000.0,
             target_v = _v(target)
             stop_v = _v(stop)
 
-            # BUY: если прогнозируемый рост > 0.5% — выходим на 0.3% ниже цели LLM,
-            # чтобы не ждать точного касания и гарантировать исполнение.
-            if verdict == "BUY" and target_v is not None:
-                move_pct = (target_v - entry_p) / entry_p * 100
+            # "Execution buffer" для цели > 0.5%: срабатываем не в точку
+            # LLM, а на 0.3% чуть ближе к entry — как limit-заявка чуть менее
+            # амбициозная, но с гарантией заполнения. Для целей <= 0.5%
+            # не трогаем, иначе эвристика съест всю прибыль.
+            #  - BUY: target выше entry → уменьшаем на 0.3% (~цель LLM минус)
+            #  - SELL: target ниже entry → увеличиваем на 0.3% (~цель LLM плюс)
+            if target_v is not None:
+                move_pct = abs(target_v - entry_p) / entry_p * 100
                 if move_pct > 0.5:
-                    target_v = target_v * 0.997
+                    if verdict == "BUY":
+                        target_v = target_v * 0.997
+                    else:  # SELL
+                        target_v = target_v * 1.003
 
             # Уровень считается сработавшим только если цена ФИЗИЧЕСКИ его коснулась
             # внутри дневного диапазона. Направление проверки зависит от того,
