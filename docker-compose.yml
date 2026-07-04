@@ -76,6 +76,15 @@ services:
       - MODEL_DISABLE_HIT_RATE=${MODEL_DISABLE_HIT_RATE:-40}
       - USE_PARTIAL_CANDLE=${USE_PARTIAL_CANDLE:-false}
       - PUBLIC_BASE_URL=${PUBLIC_BASE_URL:-}
+      # SMTP для писем верификации, восстановления пароля, дайджеста
+      - EMAIL_ENABLED=${EMAIL_ENABLED:-true}
+      - EMAIL_SMTP_HOST=${EMAIL_SMTP_HOST:-}
+      - EMAIL_SMTP_PORT=${EMAIL_SMTP_PORT:-465}
+      - EMAIL_SMTP_SSL=${EMAIL_SMTP_SSL:-true}
+      - EMAIL_SMTP_USER=${EMAIL_SMTP_USER:-}
+      - EMAIL_SMTP_PASSWORD=${EMAIL_SMTP_PASSWORD:-}
+      - EMAIL_FROM=${EMAIL_FROM:-}
+      - EMAIL_FROM_NAME=${EMAIL_FROM_NAME:-Trading Signals}
     volumes:
       - ./templates:/app/templates
       - ./static:/app/static
