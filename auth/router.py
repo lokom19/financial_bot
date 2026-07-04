@@ -181,10 +181,20 @@ async def register(
             return _err("Пароли не совпадают")
         if len(password) < 6:
             return _err("Пароль должен быть не менее 6 символов")
-        if db.query(User).filter(User.username == username).first():
+
+        # Активные (уже подтверждённые) — блок.
+        # Неактивные (pending) — это брошенные попытки регистрации,
+        # сносим их, чтобы юзер мог зарегиться заново с тем же email.
+        by_username = db.query(User).filter(User.username == username).first()
+        by_email = db.query(User).filter(User.email == email).first()
+        if by_username and by_username.is_active:
             return _err("Имя пользователя уже занято")
-        if db.query(User).filter(User.email == email).first():
+        if by_email and by_email.is_active:
             return _err("Email уже используется")
+        for stale in {by_username, by_email}:
+            if stale is not None:
+                db.delete(stale)
+        db.flush()
 
         # Юзер создаётся неактивным до подтверждения email
         code = _generate_code()
