@@ -182,6 +182,7 @@ async def update_profile(
     request: Request,
     full_name: str = Form(""),
     email: str = Form(...),
+    email_subscribed: str = Form(""),
 ):
     from main import get_db_session
     db = get_db_session()
@@ -199,6 +200,7 @@ async def update_profile(
             )
         user.full_name = full_name or None
         user.email = email
+        user.email_subscribed = bool(email_subscribed)
         db.commit()
         db.refresh(user)
         return templates.TemplateResponse(
@@ -206,5 +208,35 @@ async def update_profile(
             name="profile.html",
             context={"user": user, "success": "Профиль обновлён"},
         )
+    finally:
+        db.close()
+
+
+@router.get("/unsubscribe", response_class=HTMLResponse)
+async def unsubscribe(request: Request, token: str = ""):
+    """
+    Отписка от рассылки по ссылке из футера письма.
+    Токен уникальный на юзера, логин не требуется.
+    """
+    from main import get_db_session
+    db = get_db_session()
+    try:
+        if not token:
+            return HTMLResponse("Некорректная ссылка отписки.", status_code=400)
+        user = db.query(User).filter(User.unsubscribe_token == token).first()
+        if not user:
+            return HTMLResponse(
+                "Ссылка недействительна или устарела. Отпишитесь в личном кабинете.",
+                status_code=404,
+            )
+        user.email_subscribed = False
+        db.commit()
+        return HTMLResponse(f"""
+            <html><body style="font-family: sans-serif; max-width: 480px; margin: 80px auto; text-align: center;">
+                <h2>Отписка оформлена</h2>
+                <p>Больше не будем присылать письма на {user.email}.</p>
+                <p><a href="/">На главную</a></p>
+            </body></html>
+        """)
     finally:
         db.close()

@@ -116,6 +116,13 @@ class PipelineRunner:
             cmd.append("--walk-forward")
         return self.run_command(cmd, "Nightly pipeline (top-3 + LLM)")
 
+    def run_email_digest(self) -> bool:
+        """Утренняя рассылка дайджеста подписанным юзерам."""
+        return self.run_command(
+            ["python", "scripts/send_email_digest.py"],
+            "Email digest",
+        )
+
     def run_pipeline(self):
         """Run the full pipeline: data collection → training."""
         if self.is_running:
@@ -237,6 +244,21 @@ def main():
             max_instances=1,
             coalesce=True,
         )
+
+        # Email-дайджест — после того как nightly точно закончился.
+        # По умолчанию 8:00 МСК, переопределяется EMAIL_DIGEST_HOUR/MINUTE.
+        digest_hour = int(os.getenv("EMAIL_DIGEST_HOUR", "8"))
+        digest_minute = int(os.getenv("EMAIL_DIGEST_MINUTE", "0"))
+        if os.getenv("EMAIL_ENABLED", "true").lower() == "true":
+            scheduler.add_job(
+                runner.run_email_digest,
+                trigger=CronTrigger(hour=digest_hour, minute=digest_minute),
+                id='email_digest',
+                name=f'Email Digest {digest_hour:02d}:{digest_minute:02d}',
+                max_instances=1,
+                coalesce=True,
+            )
+            logger.info(f"  Email digest: каждый день в {digest_hour:02d}:{digest_minute:02d}")
 
         if not args.no_initial:
             logger.info("Запускаю ночной пайплайн прямо сейчас (--no-initial для отключения)...")

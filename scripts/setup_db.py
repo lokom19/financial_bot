@@ -143,8 +143,21 @@ def setup_database():
                     """))
                 except Exception:
                     pass
+            # users columns — подписка на email-рассылку
+            users_columns = [
+                ("email_subscribed", "BOOLEAN NOT NULL DEFAULT FALSE"),
+                ("unsubscribe_token", "VARCHAR(64)"),
+            ]
+            for col_name, col_type in users_columns:
+                try:
+                    conn.execute(text(f"""
+                        ALTER TABLE public.users
+                        ADD COLUMN IF NOT EXISTS {col_name} {col_type};
+                    """))
+                except Exception:
+                    pass
             conn.commit()
-            print("   ✓ New columns added (model_results + ticker_reports)")
+            print("   ✓ New columns added (model_results + ticker_reports + users)")
 
             # Create indexes
             print("\n3. Creating indexes...")
