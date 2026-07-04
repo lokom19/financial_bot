@@ -73,6 +73,44 @@
             margin-bottom: 18px;
             font-size: 14px;
         }
+        .auth-error a { color: #c0392b; text-decoration: underline; font-weight: 600; }
+        .auth-info {
+            background: #e7f5ee;
+            border: 1px solid #a6d9be;
+            border-radius: 8px;
+            padding: 10px 14px;
+            color: #1b7845;
+            margin-bottom: 18px;
+            font-size: 14px;
+        }
+        .password-wrap {
+            position: relative;
+        }
+        .password-wrap input {
+            padding-right: 44px !important;
+        }
+        .password-toggle {
+            position: absolute;
+            right: 8px;
+            top: 50%;
+            transform: translateY(-50%);
+            background: none;
+            border: none;
+            cursor: pointer;
+            font-size: 18px;
+            color: #666;
+            padding: 4px 8px;
+        }
+        .password-toggle:hover { color: #4361ee; }
+        .link-row {
+            display: flex;
+            justify-content: flex-end;
+            margin-top: -8px;
+            margin-bottom: 12px;
+            font-size: 13px;
+        }
+        .link-row a { color: #4361ee; text-decoration: none; }
+        .link-row a:hover { text-decoration: underline; }
         .auth-link {
             text-align: center;
             margin-top: 20px;
@@ -98,18 +136,28 @@
         <div class="auth-title">Добро пожаловать</div>
         <div class="auth-subtitle">Войдите в аккаунт для доступа к сигналам</div>
 
+        {% if info %}
+        <div class="auth-info">{{ info }}</div>
+        {% endif %}
         {% if error %}
-        <div class="auth-error">{{ error }}</div>
+        <div class="auth-error">{% if error_is_html %}{{ error|safe }}{% else %}{{ error }}{% endif %}</div>
         {% endif %}
 
         <form method="post" action="/auth/login">
             <div class="form-group">
                 <label for="username">Имя пользователя</label>
-                <input type="text" id="username" name="username" placeholder="username" required autofocus>
+                <input type="text" id="username" name="username" placeholder="username"
+                       value="{{ form.username or '' }}" required autofocus>
             </div>
             <div class="form-group">
                 <label for="password">Пароль</label>
-                <input type="password" id="password" name="password" placeholder="••••••••" required>
+                <div class="password-wrap">
+                    <input type="password" id="password" name="password" placeholder="••••••••" required>
+                    <button type="button" class="password-toggle" onclick="togglePw('password', this)">👁</button>
+                </div>
+            </div>
+            <div class="link-row">
+                <a href="/auth/forgot-password">Забыли пароль?</a>
             </div>
             <button type="submit" class="btn-primary">Войти</button>
         </form>
@@ -118,5 +166,12 @@
             Нет аккаунта? <a href="/auth/register">Зарегистрироваться</a>
         </div>
     </div>
+    <script>
+        function togglePw(id, btn) {
+            const el = document.getElementById(id);
+            if (el.type === 'password') { el.type = 'text';  btn.textContent = '🙈'; }
+            else                        { el.type = 'password'; btn.textContent = '👁'; }
+        }
+    </script>
 </body>
 </html>

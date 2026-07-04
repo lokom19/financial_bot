@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Подтверждение email — Trading Signals</title>
+    <link rel="stylesheet" href="/static/styles.css?v=4">
+    <style>
+        .auth-container { max-width: 440px; margin: 80px auto; background: #fff;
+            border-radius: 12px; box-shadow: 0 4px 24px rgba(0,0,0,0.10); padding: 40px 36px 32px; }
+        .auth-title { font-size: 24px; font-weight: 700; color: #1a1a2e; margin-bottom: 6px; text-align: center; }
+        .auth-subtitle { text-align: center; color: #666; margin-bottom: 28px; font-size: 14px; }
+        .form-group { margin-bottom: 18px; }
+        .form-group label { display: block; font-weight: 600; margin-bottom: 6px; color: #333; font-size: 14px; }
+        .form-group input {
+            width: 100%; padding: 12px 14px; border: 1.5px solid #ddd;
+            border-radius: 8px; font-size: 20px; box-sizing: border-box;
+            transition: border-color 0.2s; outline: none;
+            font-family: 'SF Mono', Menlo, Consolas, monospace;
+            text-align: center; letter-spacing: 0.15em;
+        }
+        .form-group input:focus { border-color: #4361ee; }
+        .btn-primary {
+            width: 100%; padding: 12px; background: #4361ee; color: #fff;
+            border: none; border-radius: 8px; font-size: 16px; font-weight: 600;
+            cursor: pointer; margin-top: 8px; transition: background 0.2s;
+        }
+        .btn-primary:hover { background: #3650d8; }
+        .btn-secondary {
+            width: 100%; padding: 10px; background: #fff; color: #4361ee;
+            border: 1.5px solid #d0d8ff; border-radius: 8px; font-size: 14px;
+            font-weight: 600; cursor: pointer; margin-top: 10px;
+        }
+        .btn-secondary:hover { background: #f4f7ff; }
+        .auth-error {
+            background: #fde8e8; border: 1px solid #f5c6c6; border-radius: 8px;
+            padding: 10px 14px; color: #c0392b; margin-bottom: 18px; font-size: 14px;
+        }
+        .auth-info {
+            background: #e7f5ee; border: 1px solid #a6d9be; border-radius: 8px;
+            padding: 10px 14px; color: #1b7845; margin-bottom: 18px; font-size: 14px;
+        }
+        .email-hint { text-align: center; color: #666; font-size: 13px; margin-bottom: 20px; }
+        .email-hint b { color: #1a1a2e; }
+        .auth-logo { text-align: center; font-size: 32px; margin-bottom: 12px; }
+    </style>
+</head>
+<body style="background: #f0f4ff; min-height: 100vh;">
+    <div class="auth-container">
+        <div class="auth-logo">✉️</div>
+        <div class="auth-title">Подтверждение почты</div>
+        <div class="auth-subtitle">Введи 6-значный код из письма</div>
+
+        <div class="email-hint">Код отправлен на <b>{{ email }}</b></div>
+
+        {% if info %}<div class="auth-info">{{ info }}</div>{% endif %}
+        {% if error %}<div class="auth-error">{{ error }}</div>{% endif %}
+
+        <form method="post" action="/auth/verify">
+            <input type="hidden" name="email" value="{{ email }}">
+            <div class="form-group">
+                <label for="code">Код подтверждения</label>
+                <input type="text" id="code" name="code" maxlength="6" pattern="[0-9]{6}"
+                       inputmode="numeric" placeholder="123456" required autofocus>
+            </div>
+            <button type="submit" class="btn-primary">Подтвердить</button>
+        </form>
+
+        <form method="post" action="/auth/resend-verification">
+            <input type="hidden" name="email" value="{{ email }}">
+            <button type="submit" class="btn-secondary">Отправить код повторно</button>
+        </form>
+    </div>
+</body>
+</html>

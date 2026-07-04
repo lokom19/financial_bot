@@ -26,5 +26,16 @@ class User(Base):
     email_subscribed = Column(Boolean, default=False, nullable=False)
     unsubscribe_token = Column(String(64), nullable=True, unique=True)
 
+    # Верификация email при регистрации.
+    # is_active=false до ввода правильного 6-значного кода.
+    email_verified_at = Column(DateTime, nullable=True)
+    verification_code = Column(String(6), nullable=True)
+    verification_expires_at = Column(DateTime, nullable=True)
+
+    # Восстановление пароля через email.
+    # Ссылка "/auth/reset-password?token=…" валидна 1 час.
+    password_reset_token = Column(String(64), nullable=True, index=True)
+    password_reset_expires_at = Column(DateTime, nullable=True)
+
     def __repr__(self):
         return f"<User(username='{self.username}', email='{self.email}')>"

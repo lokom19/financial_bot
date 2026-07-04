@@ -143,10 +143,15 @@ def setup_database():
                     """))
                 except Exception:
                     pass
-            # users columns — подписка на email-рассылку
+            # users columns — подписка на email-рассылку + верификация + reset пароля
             users_columns = [
                 ("email_subscribed", "BOOLEAN NOT NULL DEFAULT FALSE"),
                 ("unsubscribe_token", "VARCHAR(64)"),
+                ("email_verified_at", "TIMESTAMP"),
+                ("verification_code", "VARCHAR(6)"),
+                ("verification_expires_at", "TIMESTAMP"),
+                ("password_reset_token", "VARCHAR(64)"),
+                ("password_reset_expires_at", "TIMESTAMP"),
             ]
             for col_name, col_type in users_columns:
                 try:

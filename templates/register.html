@@ -42,6 +42,14 @@
         .auth-link a:hover { text-decoration: underline; }
         .auth-logo { text-align: center; font-size: 32px; margin-bottom: 12px; }
         .hint { font-size: 12px; color: #999; margin-top: 4px; }
+        .password-wrap { position: relative; }
+        .password-wrap input { padding-right: 44px !important; }
+        .password-toggle {
+            position: absolute; right: 8px; top: 50%; transform: translateY(-50%);
+            background: none; border: none; cursor: pointer;
+            font-size: 18px; color: #666; padding: 4px 8px;
+        }
+        .password-toggle:hover { color: #4361ee; }
     </style>
 </head>
 <body style="background: #f0f4ff; min-height: 100vh;">
@@ -57,24 +65,33 @@
         <form method="post" action="/auth/register">
             <div class="form-group">
                 <label for="username">Имя пользователя *</label>
-                <input type="text" id="username" name="username" placeholder="myusername" required autofocus>
+                <input type="text" id="username" name="username" placeholder="myusername"
+                       value="{{ form.username or '' }}" required autofocus>
             </div>
             <div class="form-group">
                 <label for="email">Email *</label>
-                <input type="email" id="email" name="email" placeholder="user@example.com" required>
+                <input type="email" id="email" name="email" placeholder="user@example.com"
+                       value="{{ form.email or '' }}" required>
             </div>
             <div class="form-group">
                 <label for="full_name">Полное имя</label>
-                <input type="text" id="full_name" name="full_name" placeholder="Иван Иванов">
+                <input type="text" id="full_name" name="full_name" placeholder="Иван Иванов"
+                       value="{{ form.full_name or '' }}">
             </div>
             <div class="form-group">
                 <label for="password">Пароль *</label>
-                <input type="password" id="password" name="password" placeholder="••••••••" required>
+                <div class="password-wrap">
+                    <input type="password" id="password" name="password" placeholder="••••••••" required>
+                    <button type="button" class="password-toggle" onclick="togglePw('password', this)">👁</button>
+                </div>
                 <div class="hint">Минимум 6 символов</div>
             </div>
             <div class="form-group">
                 <label for="password2">Повторите пароль *</label>
-                <input type="password" id="password2" name="password2" placeholder="••••••••" required>
+                <div class="password-wrap">
+                    <input type="password" id="password2" name="password2" placeholder="••••••••" required>
+                    <button type="button" class="password-toggle" onclick="togglePw('password2', this)">👁</button>
+                </div>
             </div>
             {% if turnstile_site_key %}
             <div style="margin: 18px 0;">
@@ -94,9 +111,15 @@
         </div>
     </div>
 
+    <script>
+        function togglePw(id, btn) {
+            const el = document.getElementById(id);
+            if (el.type === 'password') { el.type = 'text';  btn.textContent = '🙈'; }
+            else                        { el.type = 'password'; btn.textContent = '👁'; }
+        }
+    </script>
     {% if turnstile_site_key %}
     <script>
-        // Перекладываем токен капчи в hidden input перед отправкой
         function onTurnstileSuccess(token) {
             document.getElementById('cf_turnstile_response').value = token;
         }
