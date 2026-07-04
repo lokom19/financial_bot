@@ -614,6 +614,36 @@ def process_llm_for_new_results(engine, figi_list: List[str]) -> dict:
         session.close()
 
 
+def _all_data_is_stale(engine, figi_list) -> bool:
+    """
+    True если для КАЖДОГО figi последняя свеча в all_dfs совпадает с
+    max(data_end_date) в model_results (или в model_results вообще нет
+    свежих записей позднее последней свечи). Значит новых данных нет и
+    переобучение даст те же метрики → скипаем.
+    Возвращает False если хотя бы у одного тикера появились свежие данные.
+    """
+    with engine.connect() as conn:
+        for figi in figi_list:
+            try:
+                last_candle = conn.execute(
+                    text(f'SELECT MAX(timestamp::date) FROM all_dfs."{figi}"')
+                ).scalar()
+            except Exception:
+                return False  # если таблицы нет — пусть пайплайн разбирается
+            if last_candle is None:
+                return False  # нет свечей — прогоняем нормально
+            last_trained = conn.execute(
+                text("""
+                    SELECT MAX(data_end_date) FROM public.model_results
+                    WHERE db_name = :figi
+                """),
+                {"figi": figi},
+            ).scalar()
+            if last_trained is None or last_trained < last_candle:
+                return False  # у этого тикера появились новые данные
+    return True
+
+
 def run_nightly_pipeline(skip_training: bool = False, walk_forward: bool = False,
                          include_dl: bool = False, skip_llm: bool = False,
                          skip_fetch: bool = False):
@@ -644,26 +674,40 @@ def run_nightly_pipeline(skip_training: bool = False, walk_forward: bool = False
     else:
         logger.info("\n[2/4] Загрузка свечей пропущена (--skip-fetch)")
 
+    # Проверяем, появились ли новые свечи с последнего прогона.
+    # Если все тикеры уже обучены на самой свежей свече — тратить
+    # ресурсы на переобучение и LLM бессмысленно (typical case: выходной
+    # день, рынок закрыт, nightly прошёл в ночь субботы и воскресенья
+    # с одними и теми же входами → одинаковый прогноз).
+    stale = not skip_training and _all_data_is_stale(engine, figi_list)
+    if stale:
+        logger.info("\n[3/4] ⏭ Новых свечей нет с последнего прогона — обучение и LLM пропущены")
+        logger.info("       (резолв закрытых отчётов всё равно выполню)")
+        skip_training = True
+        skip_llm = True
+
     if not skip_training:
         logger.info("\n[3/4] Обучение моделей...")
         ok = run_training(figi_list, walk_forward=walk_forward, include_dl=include_dl)
         if not ok:
             logger.warning("Обучение завершилось с ошибками — всё равно запускаю LLM-обработку.")
-    else:
+    elif not stale:
         logger.info("\n[3/4] Обучение пропущено (--skip-training)")
 
     if skip_llm:
-        logger.info("\n[4/5] LLM-валидация пропущена (--skip-llm)")
+        if not stale:
+            logger.info("\n[4/5] LLM-валидация пропущена (--skip-llm)")
         stats = "skipped"
     else:
         logger.info("\n[4/5] LLM-валидация per-row...")
         stats = process_llm_for_new_results(engine, figi_list)
 
-    if skip_llm:
-        logger.info("\n[5/5] Консолидированные AI-отчёты пропущены (--skip-llm)")
-    else:
-        logger.info("\n[5/5] Резолв старых AI-отчётов + генерация новых...")
-        resolve_ticker_reports(engine)
+    # resolve запускаем всегда — это дешёво и обновит actual_close
+    # для тех прогнозов, чей prediction_date уже наступил.
+    logger.info("\n[5/5] Резолв старых AI-отчётов...")
+    resolve_ticker_reports(engine)
+    if not skip_llm:
+        logger.info("       + генерация новых AI-отчётов...")
         generate_and_save_ticker_reports(engine, pairs)
 
     elapsed = (datetime.now() - start).total_seconds()
