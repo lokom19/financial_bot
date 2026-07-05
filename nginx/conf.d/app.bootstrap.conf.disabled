@@ -11,7 +11,7 @@ upstream arima_app_bootstrap { server app:8002; }
 
 server {
     listen 80;
-    server_name vm123123new.firstbyte.club;
+    server_name trading-signal.ru www.trading-signal.ru;
 
     location /.well-known/acme-challenge/ {
         root /var/www/certbot;
