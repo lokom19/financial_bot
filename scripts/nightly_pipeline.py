@@ -302,11 +302,11 @@ def generate_and_save_ticker_reports(engine, pairs):
             try:
                 from datetime import datetime as _dt
                 d = _dt.fromisoformat(data_date_iso).date() if data_date_iso else None
-                if d:
-                    delta = 3 if d.weekday() == 4 else (2 if d.weekday() == 5 else 1)
-                    prediction_d = d + _td(days=delta)
-                else:
-                    prediction_d = None
+                # prediction_date — реальный следующий торговый день из
+                # all_dfs.<figi>. Учитывает субботние сессии Мосбиржи и
+                # праздники, не полагаясь на календарь.
+                from services.trading_days import next_trading_day
+                prediction_d = next_trading_day(engine, figi, d) if d else None
             except Exception:
                 d = None
                 prediction_d = None
