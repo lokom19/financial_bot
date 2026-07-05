@@ -128,16 +128,27 @@ def fetch_fresh_candles(days: int = FETCH_DAYS) -> bool:
         return False
 
 
+MAX_ROLLOVER_DAYS = 30  # если prediction_date старше этого — сносим запись
+
+
 def resolve_ticker_reports(engine):
     """
-    Закрывает (resolves) AI-отчёты, для которых prediction_date <= последняя свеча.
-    Заполняет actual_close/high/low + correct_direction + target_hit + stop_hit.
+    Обходит все открытые AI-отчёты (actual_close IS NULL) и:
+      - если за prediction_date есть свеча → закрывает отчёт (заполняет
+        actual_close/high/low + correct_direction + target_hit + stop_hit)
+      - если свечи за этот день нет → сдвигает prediction_date на +1
+        (рынок был закрыт, ждём следующего дня)
+      - если новое prediction_date уже занято другой записью того же
+        тикера → удаляет текущую (устаревший дубль)
+      - если запись просрочена > MAX_ROLLOVER_DAYS → удаляет
     """
     Session = sessionmaker(bind=engine)
     session = Session()
     resolved = 0
+    rolled = 0
+    dropped = 0
+    today = datetime.utcnow().date()
     try:
-        # Берём все отчёты без actual_close
         rows = session.execute(text("""
             SELECT id, figi, prediction_date, current_price, verdict,
                    target_price, stop_loss, entry_price
@@ -147,16 +158,48 @@ def resolve_ticker_reports(engine):
         """)).fetchall()
         for r in rows:
             rep_id, figi, pred_date, cur_price, verdict, tgt, stop, entry_p = r
-            # Ищем свечу за prediction_date (или ближайшую следующую)
+            # Точное совпадение даты — только «за этот день»
             bar = session.execute(text(f"""
                 SELECT timestamp::date, close, high, low
                 FROM all_dfs."{figi}"
-                WHERE timestamp::date >= :pd
-                ORDER BY timestamp ASC
+                WHERE timestamp::date = :pd
                 LIMIT 1
             """), {"pd": pred_date}).fetchone()
+
             if not bar:
+                # Не наступил торговый день → пробуем сдвинуть на +1
+                new_pd = pred_date + timedelta(days=1)
+                # 1) не сдвигаем в будущее дальше сегодня — просто ждём
+                if new_pd > today:
+                    continue
+                # 2) слишком старая запись — удаляем
+                if (today - pred_date).days > MAX_ROLLOVER_DAYS:
+                    session.execute(
+                        text("DELETE FROM public.ticker_reports WHERE id = :i"),
+                        {"i": rep_id},
+                    )
+                    dropped += 1
+                    continue
+                # 3) конфликт: уже есть запись за new_pd для этого тикера
+                conflict_id = session.execute(text("""
+                    SELECT id FROM public.ticker_reports
+                    WHERE figi = :f AND prediction_date = :pd AND id <> :i
+                """), {"f": figi, "pd": new_pd, "i": rep_id}).scalar()
+                if conflict_id:
+                    session.execute(
+                        text("DELETE FROM public.ticker_reports WHERE id = :i"),
+                        {"i": rep_id},
+                    )
+                    dropped += 1
+                else:
+                    session.execute(text("""
+                        UPDATE public.ticker_reports
+                        SET prediction_date = :pd
+                        WHERE id = :i
+                    """), {"pd": new_pd, "i": rep_id})
+                    rolled += 1
                 continue
+
             bar_date, close_p, high_p, low_p = bar
             close_p = float(close_p)
             high_p = float(high_p) if high_p is not None else None
@@ -229,7 +272,9 @@ def resolve_ticker_reports(engine):
             })
             resolved += 1
         session.commit()
-        logger.info(f"  Закрыто (resolved) AI-отчётов: {resolved}")
+        logger.info(
+            f"  AI-отчёты: resolved={resolved} · rolled_forward={rolled} · dropped={dropped}"
+        )
     finally:
         session.close()
 
@@ -302,11 +347,10 @@ def generate_and_save_ticker_reports(engine, pairs):
             try:
                 from datetime import datetime as _dt
                 d = _dt.fromisoformat(data_date_iso).date() if data_date_iso else None
-                if d:
-                    delta = 3 if d.weekday() == 4 else (2 if d.weekday() == 5 else 1)
-                    prediction_d = d + _td(days=delta)
-                else:
-                    prediction_d = None
+                # prediction_date всегда = data_date + 1 календарный день.
+                # Дальше resolve_ticker_reports сам сдвинет её вперёд, если
+                # свеча за этот день не появилась (выходной, праздник).
+                prediction_d = d + _td(days=1) if d else None
             except Exception:
                 d = None
                 prediction_d = None

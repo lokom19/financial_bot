@@ -354,15 +354,13 @@ def _load_ticker_overview(db: Session, ticker_or_figi: str) -> dict:
     # Даты для отображения и для LLM
     from datetime import timedelta as _td
     data_date = ta.get("last_candle_date")  # дата последней свечи
-    # Прогнозная дата — следующий торговый день (приближаем как +1, +3 для пятницы)
+    # Прогнозная дата — data_date + 1 (сдвиг вперёд идёт в resolve, если рынок был закрыт)
     prediction_date = None
     if data_date:
         try:
             from datetime import datetime as _dt
             d = _dt.fromisoformat(data_date).date()
-            # пятница (4) → пн (+3), суббота (5) → пн (+2), иначе +1
-            delta = 3 if d.weekday() == 4 else (2 if d.weekday() == 5 else 1)
-            prediction_date = (d + _td(days=delta)).isoformat()
+            prediction_date = (d + _td(days=1)).isoformat()
         except Exception:
             pass
 
@@ -1213,9 +1211,7 @@ async def view_model(request: Request,
                 prediction_date_str = None
                 if result.data_end_date:
                     from datetime import timedelta as _td
-                    d = result.data_end_date
-                    delta = 3 if d.weekday() == 4 else (2 if d.weekday() == 5 else 1)
-                    prediction_date_str = (d + _td(days=delta)).isoformat()
+                    prediction_date_str = (result.data_end_date + _td(days=1)).isoformat()
 
                 files_data.append({
                     'id': result.id,
