@@ -1,75 +1,49 @@
 <!DOCTYPE html>
 <html lang="ru">
 <head><meta charset="UTF-8"></head>
-<body style="margin:0; padding:0; background:#f6f7f9; font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Arial,sans-serif; color:#1e293b;">
-<table cellpadding="0" cellspacing="0" width="100%" style="background:#f6f7f9; padding:32px 12px;">
+<body style="margin:0; padding:0; background:#fafafa; font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Arial,sans-serif; color:#1e293b; font-size:15px; line-height:1.55;">
+<table cellpadding="0" cellspacing="0" width="100%" style="background:#fafafa; padding:32px 12px;">
     <tr><td align="center">
-        <table cellpadding="0" cellspacing="0" width="620" style="background:#fff; border-radius:14px; overflow:hidden; box-shadow:0 4px 16px rgba(0,0,0,0.06);">
+        <table cellpadding="0" cellspacing="0" width="580" style="background:#ffffff; border:1px solid #e2e8f0; border-radius:8px; overflow:hidden;">
 
-            <tr><td style="padding:32px 32px 8px; text-align:center;">
-                <div style="font-size:22px; font-weight:700;">📈 Trading Signals</div>
-                <div style="margin-top:22px; font-size:26px; font-weight:800; letter-spacing:-0.02em; color:#4f46e5;">
-                    Новая фича — калькулятор портфеля
-                </div>
-                <div style="margin-top:8px; font-size:14px; color:#64748b;">
-                    Считаем, что было бы с деньгами, если бы вы следовали AI-сигналам
+            <tr><td style="padding:24px 28px 8px;">
+                <div style="font-size:14px; color:#64748b;">Trading Signals</div>
+                <div style="margin-top:8px; font-size:20px; font-weight:600; color:#1e293b;">
+                    Обновление: калькулятор портфеля
                 </div>
             </td></tr>
 
-            <tr><td style="padding:20px 32px 0;">
-                <div style="font-size:15px; line-height:1.55;">
-                    Привет, <b>{{ username }}</b>!
-                </div>
-                <div style="font-size:15px; color:#334155; margin-top:10px; line-height:1.65;">
-                    Мы добавили <b>калькулятор портфеля</b> — он берёт всю историю
-                    наших AI-вердиктов и симулирует, сколько денег вы бы заработали
-                    (или потеряли), если бы каждый день следовали сигналам.
-                </div>
+            <tr><td style="padding:16px 28px 0; color:#334155;">
+                <p style="margin:0 0 12px;">Здравствуйте, {{ username }}.</p>
+                <p style="margin:0 0 12px;">
+                    В личном кабинете появилась новая страница — калькулятор портфеля.
+                    Он показывает, как вёл бы себя депозит, если бы каждый день
+                    следовал сохранённым вердиктам:
+                </p>
+                <ul style="margin:0 0 16px 20px; padding:0; color:#334155;">
+                    <li>кривая капитала за период</li>
+                    <li>win rate, лучшая и худшая сделка</li>
+                    <li>разбивка выходов: цель, стоп или закрытие дня</li>
+                    <li>список сделок с деталями</li>
+                </ul>
+                <p style="margin:0 0 12px;">
+                    Стартовый депозит и комиссию за сделку можно менять на самой странице.
+                </p>
+                <p style="margin:24px 0 0;">
+                    Открыть: <a href="{{ base_url }}/portfolio" style="color:#1e40af;">{{ base_url }}/portfolio</a>
+                </p>
             </td></tr>
 
-            <tr><td style="padding:24px 32px 0;">
-                <div style="background:#f8fafc; border:1px solid #e2e8f0; border-radius:10px; padding:18px 20px;">
-                    <div style="font-size:12px; text-transform:uppercase; letter-spacing:0.06em; color:#64748b; font-weight:700;">
-                        Что показывает калькулятор
-                    </div>
-                    <ul style="margin:12px 0 0; padding-left:22px; font-size:14px; line-height:1.7; color:#334155;">
-                        <li><b>Кривая капитала</b> — как рос или падал бы депозит</li>
-                        <li><b>Win rate и лучшая/худшая сделка</b> — сколько сигналов сработало</li>
-                        <li><b>Причины выхода</b> — по цели, по стопу или по close</li>
-                        <li><b>Список сделок</b> — детали каждой BUY/SELL</li>
-                    </ul>
-                </div>
+            <tr><td style="padding:20px 28px 24px; color:#64748b; font-size:12px;">
+                Результаты гипотетические, без учёта проскальзывания и налогов.
+                Не является инвестиционной рекомендацией.
             </td></tr>
 
-            <tr><td style="padding:22px 32px 0;">
-                <div style="font-size:14px; color:#475569; line-height:1.65;">
-                    Можно поменять <b>стартовый депозит</b> и <b>комиссию за сделку</b>,
-                    а фильтр «только закрытые сделки» показывает только те, где мы уже
-                    знаем факт.
-                </div>
+            {% if unsubscribe_url %}
+            <tr><td style="padding:14px 28px; background:#f8fafc; text-align:center; font-size:11px; color:#94a3b8;">
+                <a href="{{ unsubscribe_url }}" style="color:#94a3b8;">отписаться от писем</a>
             </td></tr>
-
-            <tr><td style="padding:28px 32px; text-align:center;">
-                <a href="{{ base_url }}/portfolio"
-                   style="display:inline-block; background:#4f46e5; color:#fff; text-decoration:none;
-                          padding:14px 36px; border-radius:10px; font-weight:700; font-size:15px;">
-                    Открыть калькулятор →
-                </a>
-            </td></tr>
-
-            <tr><td style="padding:0 32px 24px;">
-                <div style="font-size:12px; color:#94a3b8; text-align:center; line-height:1.6;">
-                    Результаты — гипотетические, без учёта проскальзывания и налогов.
-                    Не является инвестиционной рекомендацией.
-                </div>
-            </td></tr>
-
-            <tr><td style="padding:14px 32px; background:#f8fafc; text-align:center; font-size:11px; color:#94a3b8; line-height:1.6;">
-                Письмо отправлено разово, чтобы рассказать о новой фиче.
-                {% if unsubscribe_url %}
-                Не хотите таких писем? <a href="{{ unsubscribe_url }}" style="color:#64748b;">Отписаться</a>.
-                {% endif %}
-            </td></tr>
+            {% endif %}
         </table>
     </td></tr>
 </table>

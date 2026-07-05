@@ -86,7 +86,7 @@ def main():
     session = Session()
 
     base_url = os.getenv("PUBLIC_BASE_URL", "http://localhost:8002").rstrip("/")
-    subject = "📈 Trading Signals · калькулятор портфеля уже доступен"
+    subject = "Trading Signals: калькулятор портфеля"
 
     jinja = Environment(
         loader=FileSystemLoader(str(PROJECT_ROOT / "templates")),
@@ -120,18 +120,32 @@ def main():
         else:
             token = _ensure_token(session, user_id, token)
 
+        unsubscribe_url = f"{base_url}/auth/unsubscribe?token={token}" if token else None
         html = template.render(
-            username=username,
-            base_url=base_url,
-            unsubscribe_url=f"{base_url}/auth/unsubscribe?token={token}" if token else None,
+            username=username, base_url=base_url,
+            unsubscribe_url=unsubscribe_url,
         )
+        # Текстовый вариант — многие спам-фильтры (mail.ru особенно) любят
+        # видеть plaintext альтернативу и меньше подозрительно относятся к письму.
+        text_body = (
+            f"Здравствуйте, {username}.\n\n"
+            f"В личном кабинете появилась новая страница — калькулятор портфеля.\n"
+            f"Он показывает, как вёл бы себя депозит, если бы каждый день следовать\n"
+            f"сохранённым вердиктам: кривая капитала, win rate, лучшая/худшая сделка,\n"
+            f"разбивка выходов (цель / стоп / закрытие дня), список сделок.\n\n"
+            f"Открыть: {base_url}/portfolio\n\n"
+            f"Результаты гипотетические, без учёта проскальзывания и налогов.\n"
+            f"Не является инвестиционной рекомендацией.\n"
+        )
+        if unsubscribe_url:
+            text_body += f"\nОтписаться: {unsubscribe_url}\n"
 
         if args.dry_run:
             logger.info(f"[DRY-RUN] → {email}")
             sent += 1
             continue
 
-        if send_email(email, subject, html):
+        if send_email(email, subject, html, text_body=text_body):
             sent += 1
         else:
             failed += 1
