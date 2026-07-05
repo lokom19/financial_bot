@@ -639,7 +639,8 @@ async def ai_reports_history(ticker: str, days: int = 60):
                    verdict, confidence, entry_price, target_price, stop_loss,
                    reasoning,
                    actual_close, actual_high, actual_low,
-                   correct_direction, target_hit, stop_hit
+                   correct_direction, target_hit, stop_hit,
+                   models_snapshot_json, ta_summary_json
             FROM (
                 SELECT DISTINCT ON (prediction_date) *
                 FROM public.ticker_reports
@@ -650,6 +651,53 @@ async def ai_reports_history(ticker: str, days: int = 60):
             ) latest
             ORDER BY prediction_date DESC NULLS LAST, timestamp DESC
         """), {"figi": figi, "days": days}).fetchall()
+
+        import json as _json
+
+        def _llm_direction(verdict):
+            if verdict == "BUY":  return "bullish"
+            if verdict == "SELL": return "bearish"
+            if verdict in ("HOLD", "NEUTRAL"): return "neutral"
+            return None
+
+        def _ml_direction(snapshot_json):
+            """Мажоритарный сигнал по моделям из models_snapshot_json."""
+            if not snapshot_json:
+                return None
+            try:
+                models = _json.loads(snapshot_json)
+            except Exception:
+                return None
+            if not isinstance(models, list):
+                return None
+            counts = {"bullish": 0, "bearish": 0, "neutral": 0}
+            for m in models:
+                sig = (m.get("signal") or "").upper()
+                if sig == "BUY":
+                    counts["bullish"] += 1
+                elif sig == "SELL":
+                    counts["bearish"] += 1
+                elif sig in ("HOLD", "NEUTRAL"):
+                    counts["neutral"] += 1
+            top = max(counts, key=counts.get)
+            return top if counts[top] > 0 else None
+
+        def _ta_direction(summary_json):
+            """Извлекает БЫЧИЙ/МЕДВЕЖИЙ/НЕЙТРАЛЬНЫЙ из ta_summary_json."""
+            if not summary_json:
+                return None
+            try:
+                data = _json.loads(summary_json)
+            except Exception:
+                return None
+            v = (data.get("verdict") or "").upper()
+            if "БЫЧ" in v or "BULL" in v:
+                return "bullish"
+            if "МЕДВЕЖ" in v or "BEAR" in v:
+                return "bearish"
+            if "НЕЙТР" in v or "СМЕШ" in v or "NEUTRAL" in v:
+                return "neutral"
+            return None
 
         items = []
         for r in reports:
@@ -669,6 +717,20 @@ async def ai_reports_history(ticker: str, days: int = 60):
                         target_exec = round(target_p * 1.003, 2)
                 else:
                     target_exec = target_p
+            dir_llm = _llm_direction(r[5])
+            dir_ml  = _ml_direction(r[17])
+            dir_ta  = _ta_direction(r[18])
+            available = [d for d in (dir_llm, dir_ml, dir_ta) if d]
+            # signals_agree: True если все три источника есть и направлены в одну
+            # ненейтральную сторону; False если есть конфликт хотя бы двух;
+            # None если данных мало (< 2 источников).
+            if len(available) < 2:
+                signals_agree = None
+            elif len(set(available)) == 1 and available[0] in ("bullish", "bearish"):
+                signals_agree = True
+            else:
+                signals_agree = False
+
             items.append({
                 "id": r[0],
                 "timestamp": r[1].isoformat() if r[1] else None,
@@ -688,6 +750,10 @@ async def ai_reports_history(ticker: str, days: int = 60):
                 "correct_direction": r[14],
                 "target_hit": r[15],
                 "stop_hit": r[16],
+                "direction_llm": dir_llm,
+                "direction_ml": dir_ml,
+                "direction_ta": dir_ta,
+                "signals_agree": signals_agree,
             })
 
         # Статистика по корректности

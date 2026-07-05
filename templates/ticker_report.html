@@ -767,8 +767,30 @@
                 </div>`;
         }
 
+        let AI_TABLE_DATA = null;
+        let AI_ONLY_AGREED = false;
+
         function renderAITable(data, wrap) {
-            if (data.items.length === 0) { wrap.innerHTML = ''; return; }
+            AI_TABLE_DATA = data;
+            const items = AI_ONLY_AGREED
+                ? data.items.filter(it => it.signals_agree === true)
+                : data.items;
+
+            const filterBar = `
+                <div style="display:flex; gap:10px; align-items:center; margin-bottom:12px; font-size:13px;">
+                    <label style="display:flex; align-items:center; gap:6px; cursor:pointer; user-select:none;">
+                        <input type="checkbox" id="ai-only-agreed" ${AI_ONLY_AGREED ? 'checked' : ''}
+                               onchange="AI_ONLY_AGREED=this.checked; renderAITable(AI_TABLE_DATA, document.getElementById('ai-history-wrap'));">
+                        Только совпадения сигналов (LLM + ML + TA)
+                    </label>
+                    <span class="text-mute" style="font-size:12px;">${items.length} из ${data.items.length}</span>
+                </div>`;
+
+            if (items.length === 0) {
+                wrap.innerHTML = filterBar +
+                    '<div style="text-align:center; padding:24px; color:var(--text-muted); font-size:13px;">Нет вердиктов, где все три сигнала совпали.</div>';
+                return;
+            }
 
             const verdictBadge = (v) => {
                 if (v === 'BUY')  return '<span class="x-pill x-pill-success">BUY</span>';
@@ -807,12 +829,21 @@
                 <th class="right">Стоп</th>
                 <th class="right">Факт (close)</th>
                 <th class="right" title="High и Low дня прогноза">High / Low</th>
+                <th class="center" title="Совпадают ли направления LLM, консенсуса ML и TA: ✓ — все три в одну сторону; ✗ — расхождение; — не хватает данных">Согласие</th>
                 <th class="center">Направление</th>
                 <th class="center" title="Достигла ли цена target_price">Цель</th>
                 <th class="center" title="Сработал ли stop_loss">Стоп</th>
             </tr></thead><tbody>`;
 
-            for (const it of data.items) {
+            const agreeBadge = (agree, it) => {
+                const dirs = [it.direction_llm, it.direction_ml, it.direction_ta].filter(x => x);
+                const title = `LLM: ${it.direction_llm || '—'} · ML: ${it.direction_ml || '—'} · TA: ${it.direction_ta || '—'}`;
+                if (agree === true)  return `<span class="x-pill x-pill-success" title="${title}">✓ единогласно</span>`;
+                if (agree === false) return `<span class="x-pill x-pill-danger"  title="${title}">✗ расхождение</span>`;
+                return `<span class="x-pill x-pill-muted" title="${title}">—</span>`;
+            };
+
+            for (const it of items) {
                 const high = it.actual_high, low = it.actual_low;
                 const hlCell = (high !== null && low !== null)
                     ? `<span class="diff-up">${high.toFixed(2)}</span> <span class="text-mute">/</span> <span class="diff-down">${low.toFixed(2)}</span>`
@@ -840,13 +871,14 @@
                     <td class="right" style="color: var(--danger);">${fmt(it.stop_loss)}</td>
                     <td class="right">${it.actual_close === null ? '<span class="text-mute">—</span>' : it.actual_close.toFixed(2)}</td>
                     <td class="right" style="font-size:12px;">${hlCell}</td>
+                    <td class="center">${agreeBadge(it.signals_agree, it)}</td>
                     <td class="center">${directionBadge(it.correct_direction, it)}</td>
                     <td class="center">${hitBadge(it.target_hit)}</td>
                     <td class="center">${hitBadge(it.stop_hit)}</td>
                 </tr>`;
             }
             html += '</tbody></table>';
-            wrap.innerHTML = html;
+            wrap.innerHTML = filterBar + html;
         }
 
         // ============================================================
