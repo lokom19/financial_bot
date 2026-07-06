@@ -27,9 +27,13 @@ logger = logging.getLogger(__name__)
 DEFAULT_COMMISSION_PCT = 0.05  # 0.05% за сделку (комиссия Tinkoff "Инвестор")
 
 
+CONFIDENCE_LEVEL = {"низкая": 1, "средняя": 2, "высокая": 3}
+
+
 def simulate(engine, initial_capital: float = 100_000.0,
              commission_pct: float = DEFAULT_COMMISSION_PCT,
-             only_closed: bool = True) -> dict:
+             only_closed: bool = True,
+             min_confidence: str = "all") -> dict:
     """
     Симулирует торговлю по всем AI-вердиктам из ticker_reports.
 
@@ -37,6 +41,9 @@ def simulate(engine, initial_capital: float = 100_000.0,
         initial_capital: стартовый депозит (RUB)
         commission_pct: комиссия за сделку (в %, в одну сторону)
         only_closed: учитывать только закрытые позиции (actual_close IS NOT NULL)
+        min_confidence: "all" | "средняя" | "высокая" — минимальный уровень
+                        уверенности LLM для сделки. Строгое >= по шкале
+                        низкая(1) < средняя(2) < высокая(3).
 
     Returns:
         {
@@ -75,6 +82,28 @@ def simulate(engine, initial_capital: float = 100_000.0,
                 "best_trade_pct": None,
                 "worst_trade_pct": None,
                 "commission_pct": commission_pct,
+            },
+            "equity_curve": [],
+            "trades": [],
+            "by_ticker": {},
+        }
+
+    # Фильтр по уверенности: оставляем только вердикты >= min_confidence
+    min_level = CONFIDENCE_LEVEL.get(min_confidence, 0)
+    if min_level > 0:
+        rows = [r for r in rows if CONFIDENCE_LEVEL.get((r[3] or "").lower(), 0) >= min_level]
+
+    if not rows:
+        return {
+            "summary": {
+                "initial_capital": initial_capital,
+                "final_equity": initial_capital,
+                "total_return_pct": 0.0,
+                "trades": 0, "winning_trades": 0,
+                "win_rate_pct": None,
+                "best_trade_pct": None, "worst_trade_pct": None,
+                "commission_pct": commission_pct,
+                "min_confidence": min_confidence,
             },
             "equity_curve": [],
             "trades": [],
@@ -280,6 +309,7 @@ def simulate(engine, initial_capital: float = 100_000.0,
         "best_trade_pct": best,
         "worst_trade_pct": worst,
         "commission_pct": commission_pct,
+        "min_confidence": min_confidence,
         "days_simulated": len(equity_curve),
         "exits": {
             "target": n_target,

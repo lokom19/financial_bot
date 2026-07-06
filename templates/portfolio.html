@@ -186,6 +186,14 @@
                 <input type="checkbox" id="only-closed" checked>
                 Только закрытые сделки
             </label>
+            <label>
+                Уверенность
+                <select id="min-confidence" style="padding: 10px 12px; font-size: 14px; border: 1.5px solid var(--border); border-radius: 10px;">
+                    <option value="all">Все сигналы</option>
+                    <option value="средняя">≥ средняя</option>
+                    <option value="высокая">только высокая</option>
+                </select>
+            </label>
             <button id="simulate-btn" onclick="runSimulation()">Пересчитать</button>
         </div>
 
@@ -227,8 +235,9 @@
         const initial = parseFloat(document.getElementById('initial').value) || 100000;
         const commission = parseFloat(document.getElementById('commission').value) || 0;
         const onlyClosed = document.getElementById('only-closed').checked;
+        const minConfidence = document.getElementById('min-confidence').value;
         try {
-            const resp = await fetch(`/api/portfolio?initial=${initial}&commission=${commission}&only_closed=${onlyClosed}`);
+            const resp = await fetch(`/api/portfolio?initial=${initial}&commission=${commission}&only_closed=${onlyClosed}&min_confidence=${encodeURIComponent(minConfidence)}`);
             const data = await resp.json();
             renderSummary(data.summary);
             renderEquity(data.equity_curve, data.summary);
@@ -411,10 +420,19 @@
         }
         let html = '<table class="x-table"><thead><tr>'
             + '<th>Дата</th><th>Тикер</th><th>Вердикт</th>'
+            + '<th class="center" title="Уверенность LLM: 3 точки = высокая, 2 = средняя, 1 = низкая">Уверенность</th>'
             + '<th class="right">Вход</th><th class="right">Выход</th><th>Причина</th>'
             + '<th class="right" title="Цена закрылась в нашу сторону от входа">Направление</th>'
             + '<th class="right">Доход %</th><th class="right">P&L, ₽</th>'
             + '<th class="right">Капитал в сделке</th></tr></thead><tbody>';
+        const confidenceBadge = (c) => {
+            const val = (c || '').toLowerCase();
+            const filled = val === 'высокая' ? 3 : val === 'средняя' ? 2 : val === 'низкая' ? 1 : 0;
+            if (filled === 0) return '<span class="text-mute" title="нет данных">—</span>';
+            const color = filled === 3 ? '#059669' : filled === 2 ? '#d97706' : '#94a3b8';
+            const dots = '●'.repeat(filled) + '<span style="color:#e2e8f0">' + '●'.repeat(3-filled) + '</span>';
+            return `<span title="${c}" style="color:${color}; font-size:14px; letter-spacing:2px;">${dots}</span>`;
+        };
         // показываем последние 100 сделок в обратном порядке (свежие сверху)
         for (const t of trades.slice().reverse().slice(0, 100)) {
             const vCls = t.verdict === 'BUY' ? 'verdict-buy' : 'verdict-sell';
@@ -430,6 +448,7 @@
                 <td><span class="text-mute">${t.date}</span></td>
                 <td><b>${t.ticker}</b></td>
                 <td><span class="verdict-pill ${vCls}">${t.verdict}</span></td>
+                <td class="center">${confidenceBadge(t.confidence)}</td>
                 <td class="right">${t.entry_price.toFixed(2)}</td>
                 <td class="right">${t.exit_price.toFixed(2)}</td>
                 <td><span class="exit-reason">${exitLabels[t.exit_reason] || t.exit_reason}</span></td>

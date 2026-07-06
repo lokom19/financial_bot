@@ -730,6 +730,38 @@
             }
         }
 
+        // ---- Клиентские фильтры для AI-вердиктов ----
+        let AI_TABLE_DATA = null;
+        let AI_ONLY_AGREED = false;
+        let AI_MIN_CONFIDENCE = "all";  // "all" | "средняя" | "высокая"
+        const CONF_LEVEL = { "низкая": 1, "средняя": 2, "высокая": 3 };
+
+        function _applyAIFilters(items) {
+            const minLvl = CONF_LEVEL[AI_MIN_CONFIDENCE] || 0;
+            return items.filter(it => {
+                if (AI_ONLY_AGREED && it.signals_agree !== true) return false;
+                if (minLvl > 0) {
+                    const c = (it.confidence || '').toLowerCase();
+                    if ((CONF_LEVEL[c] || 0) < minLvl) return false;
+                }
+                return true;
+            });
+        }
+
+        function _computeSummary(items) {
+            const resolved = items.filter(it => it.correct_direction !== null);
+            const correct  = resolved.filter(it => it.correct_direction);
+            const targetHits = resolved.filter(it => it.target_hit);
+            const accuracy = resolved.length ? Math.round(correct.length / resolved.length * 1000) / 10 : null;
+            return {
+                total: items.length,
+                resolved: resolved.length,
+                correct: correct.length,
+                accuracy,
+                target_hits: targetHits.length,
+            };
+        }
+
         function renderAISummary(data, el) {
             if (data.total === 0) {
                 el.innerHTML = `<div style="padding: 16px; background: var(--surface-alt); border-radius: 10px; color: var(--text-muted); font-size: 13px;">
@@ -738,57 +770,69 @@
                 </div>`;
                 return;
             }
-            const accClass = data.accuracy === null ? '' :
-                (data.accuracy >= 55 ? 'green' : (data.accuracy >= 45 ? 'amber' : 'red'));
+            const items = _applyAIFilters(data.items);
+            const s = _computeSummary(items);
+            const accClass = s.accuracy === null ? '' :
+                (s.accuracy >= 55 ? 'green' : (s.accuracy >= 45 ? 'amber' : 'red'));
             el.innerHTML = `
                 <div class="x-stats-row">
                     <div class="x-stat">
                         <span class="x-stat-label">Всего вердиктов</span>
-                        <span class="x-stat-value">${data.total}</span>
+                        <span class="x-stat-value">${s.total}</span>
                     </div>
                     <div class="x-stat">
                         <span class="x-stat-label">Закрыто</span>
-                        <span class="x-stat-value">${data.resolved}</span>
+                        <span class="x-stat-value">${s.resolved}</span>
                     </div>
                     <div class="x-stat">
                         <span class="x-stat-label">Корректных</span>
-                        <span class="x-stat-value green">${data.correct}</span>
-                        <span class="x-stat-sub">из ${data.resolved}</span>
+                        <span class="x-stat-value green">${s.correct}</span>
+                        <span class="x-stat-sub">из ${s.resolved}</span>
                     </div>
                     <div class="x-stat">
                         <span class="x-stat-label">Точность LLM</span>
-                        <span class="x-stat-value ${accClass}">${data.accuracy === null ? '—' : data.accuracy + '%'}</span>
+                        <span class="x-stat-value ${accClass}">${s.accuracy === null ? '—' : s.accuracy + '%'}</span>
                     </div>
                     <div class="x-stat">
                         <span class="x-stat-label">Цель достигнута</span>
-                        <span class="x-stat-value green">${data.target_hits}</span>
-                        <span class="x-stat-sub">из ${data.resolved}</span>
+                        <span class="x-stat-value green">${s.target_hits}</span>
+                        <span class="x-stat-sub">из ${s.resolved}</span>
                     </div>
                 </div>`;
         }
 
-        let AI_TABLE_DATA = null;
-        let AI_ONLY_AGREED = false;
+        function _refreshAIViews() {
+            if (!AI_TABLE_DATA) return;
+            renderAISummary(AI_TABLE_DATA, document.getElementById('ai-summary'));
+            renderAITable(AI_TABLE_DATA, document.getElementById('ai-history-wrap'));
+        }
 
         function renderAITable(data, wrap) {
             AI_TABLE_DATA = data;
-            const items = AI_ONLY_AGREED
-                ? data.items.filter(it => it.signals_agree === true)
-                : data.items;
+            const items = _applyAIFilters(data.items);
 
             const filterBar = `
-                <div style="display:flex; gap:10px; align-items:center; margin-bottom:12px; font-size:13px;">
+                <div style="display:flex; gap:16px; align-items:center; margin-bottom:12px; font-size:13px; flex-wrap:wrap;">
                     <label style="display:flex; align-items:center; gap:6px; cursor:pointer; user-select:none;">
                         <input type="checkbox" id="ai-only-agreed" ${AI_ONLY_AGREED ? 'checked' : ''}
-                               onchange="AI_ONLY_AGREED=this.checked; renderAITable(AI_TABLE_DATA, document.getElementById('ai-history-wrap'));">
+                               onchange="AI_ONLY_AGREED=this.checked; _refreshAIViews();">
                         Только совпадения сигналов (LLM + ML + TA)
+                    </label>
+                    <label style="display:flex; align-items:center; gap:6px;">
+                        Уверенность:
+                        <select onchange="AI_MIN_CONFIDENCE=this.value; _refreshAIViews();"
+                                style="padding:4px 8px; border:1px solid var(--border); border-radius:6px;">
+                            <option value="all"     ${AI_MIN_CONFIDENCE==='all'     ?'selected':''}>все</option>
+                            <option value="средняя" ${AI_MIN_CONFIDENCE==='средняя' ?'selected':''}>≥ средняя</option>
+                            <option value="высокая" ${AI_MIN_CONFIDENCE==='высокая' ?'selected':''}>только высокая</option>
+                        </select>
                     </label>
                     <span class="text-mute" style="font-size:12px;">${items.length} из ${data.items.length}</span>
                 </div>`;
 
             if (items.length === 0) {
                 wrap.innerHTML = filterBar +
-                    '<div style="text-align:center; padding:24px; color:var(--text-muted); font-size:13px;">Нет вердиктов, где все три сигнала совпали.</div>';
+                    '<div style="text-align:center; padding:24px; color:var(--text-muted); font-size:13px;">Нет вердиктов, подходящих под выбранные фильтры.</div>';
                 return;
             }
 

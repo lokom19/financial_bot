@@ -406,19 +406,22 @@ def _load_ticker_overview(db: Session, ticker_or_figi: str) -> dict:
 async def portfolio_simulation(request: Request,
                                 initial: float = 100_000.0,
                                 commission: float = 0.05,
-                                only_closed: bool = True):
+                                only_closed: bool = True,
+                                min_confidence: str = "all"):
     """
     Симулирует торговлю по AI-вердиктам и возвращает equity curve + сделки.
     Параметры:
-      initial    — стартовый депозит (RUB), default 100 000
-      commission — комиссия за сделку в %, default 0.05
-      only_closed — учитывать только закрытые позиции, default true
+      initial        — стартовый депозит (RUB), default 100 000
+      commission     — комиссия за сделку в %, default 0.05
+      only_closed    — учитывать только закрытые позиции, default true
+      min_confidence — фильтр по уверенности LLM: "all" | "средняя" | "высокая"
     """
     result = simulate_portfolio(
         engine,
         initial_capital=initial,
         commission_pct=commission,
         only_closed=only_closed,
+        min_confidence=min_confidence,
     )
     return result
 
