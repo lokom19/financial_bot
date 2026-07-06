@@ -33,7 +33,8 @@ CONFIDENCE_LEVEL = {"низкая": 1, "средняя": 2, "высокая": 3}
 def simulate(engine, initial_capital: float = 100_000.0,
              commission_pct: float = DEFAULT_COMMISSION_PCT,
              only_closed: bool = True,
-             min_confidence: str = "all") -> dict:
+             min_confidence: str = "all",
+             weighted_by_confidence: bool = False) -> dict:
     """
     Симулирует торговлю по всем AI-вердиктам из ticker_reports.
 
@@ -44,6 +45,9 @@ def simulate(engine, initial_capital: float = 100_000.0,
         min_confidence: "all" | "средняя" | "высокая" — минимальный уровень
                         уверенности LLM для сделки. Строгое >= по шкале
                         низкая(1) < средняя(2) < высокая(3).
+        weighted_by_confidence: если True — капитал в день распределяется не
+                        поровну, а пропорционально уверенности (высокая ×3,
+                        средняя ×2, низкая ×1). Если False — равные доли.
 
     Returns:
         {
@@ -150,8 +154,16 @@ def simulate(engine, initial_capital: float = 100_000.0,
             })
             continue
 
-        # Капитал на каждую активную сделку = equity / n_active
-        per_trade_capital = equity / n_active
+        # Распределение капитала между активными сделками дня:
+        #  - weighted_by_confidence=False → равные доли (equity / n_active)
+        #  - weighted_by_confidence=True  → пропорционально уверенности
+        #     (высокая ×3, средняя ×2, низкая/пусто ×1)
+        if weighted_by_confidence:
+            weights = {id(r): CONFIDENCE_LEVEL.get((r[3] or "").lower(), 1) for r in active}
+            total_weight = sum(weights.values()) or 1
+        else:
+            weights = None
+        equal_capital = equity / n_active
         day_pnl = 0.0
 
         for r in day_rows:
@@ -161,6 +173,11 @@ def simulate(engine, initial_capital: float = 100_000.0,
 
             if verdict not in ("BUY", "SELL"):
                 continue
+
+            if weights is not None:
+                per_trade_capital = equity * weights[id(r)] / total_weight
+            else:
+                per_trade_capital = equal_capital
 
             # Цена входа: entry_price если задан LLM-ом, иначе current_price
             entry_p = float(entry) if entry is not None else float(cur_price)

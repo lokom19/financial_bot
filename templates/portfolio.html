@@ -194,6 +194,10 @@
                     <option value="высокая">только высокая</option>
                 </select>
             </label>
+            <label class="ck-line" title="В сделки с высокой уверенностью вкладываем больше капитала (веса 3/2/1)">
+                <input type="checkbox" id="weighted-by-conf">
+                Взвешивать капитал по уверенности
+            </label>
             <button id="simulate-btn" onclick="runSimulation()">Пересчитать</button>
         </div>
 
@@ -236,8 +240,9 @@
         const commission = parseFloat(document.getElementById('commission').value) || 0;
         const onlyClosed = document.getElementById('only-closed').checked;
         const minConfidence = document.getElementById('min-confidence').value;
+        const weighted = document.getElementById('weighted-by-conf').checked;
         try {
-            const resp = await fetch(`/api/portfolio?initial=${initial}&commission=${commission}&only_closed=${onlyClosed}&min_confidence=${encodeURIComponent(minConfidence)}`);
+            const resp = await fetch(`/api/portfolio?initial=${initial}&commission=${commission}&only_closed=${onlyClosed}&min_confidence=${encodeURIComponent(minConfidence)}&weighted_by_confidence=${weighted}`);
             const data = await resp.json();
             renderSummary(data.summary);
             renderEquity(data.equity_curve, data.summary);

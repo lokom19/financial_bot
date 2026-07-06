@@ -407,14 +407,16 @@ async def portfolio_simulation(request: Request,
                                 initial: float = 100_000.0,
                                 commission: float = 0.05,
                                 only_closed: bool = True,
-                                min_confidence: str = "all"):
+                                min_confidence: str = "all",
+                                weighted_by_confidence: bool = False):
     """
     Симулирует торговлю по AI-вердиктам и возвращает equity curve + сделки.
     Параметры:
-      initial        — стартовый депозит (RUB), default 100 000
-      commission     — комиссия за сделку в %, default 0.05
-      only_closed    — учитывать только закрытые позиции, default true
-      min_confidence — фильтр по уверенности LLM: "all" | "средняя" | "высокая"
+      initial                — стартовый депозит (RUB), default 100 000
+      commission             — комиссия за сделку в %, default 0.05
+      only_closed            — учитывать только закрытые позиции, default true
+      min_confidence         — фильтр по уверенности: "all" | "средняя" | "высокая"
+      weighted_by_confidence — распределять капитал пропорционально уверенности
     """
     result = simulate_portfolio(
         engine,
@@ -422,6 +424,7 @@ async def portfolio_simulation(request: Request,
         commission_pct=commission,
         only_closed=only_closed,
         min_confidence=min_confidence,
+        weighted_by_confidence=weighted_by_confidence,
     )
     return result
 
