@@ -44,7 +44,18 @@ logging.basicConfig(
 )
 logger = logging.getLogger("nightly")
 
-TOP_TICKERS = ["SBER", "OZON", "VTBR", "YDEX"]
+TOP_TICKERS = [
+    # Банки / финансы
+    "SBER", "VTBR",
+    # Ритейл / e-commerce
+    "OZON",
+    # IT
+    "YDEX", "HEAD", "MTSS",
+    # Нефтегаз
+    "GAZP", "LKOH", "ROSN",
+    # Транспорт
+    "AFLT",
+]
 TRAINING_TIMEOUT = int(os.getenv("NIGHTLY_TRAIN_TIMEOUT", "10800"))  # 3 hours
 LLM_LOOKBACK_HOURS = int(os.getenv("NIGHTLY_LLM_LOOKBACK_HOURS", "12"))
 # Сколько последних дней дотягивать свечами перед обучением
