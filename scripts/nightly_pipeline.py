@@ -50,11 +50,9 @@ TOP_TICKERS = [
     # Ритейл / e-commerce
     "OZON",
     # IT
-    "YDEX", "HEAD", "MTSS",
-    # Нефтегаз
-    "GAZP", "LKOH", "ROSN",
-    # Транспорт
-    "AFLT",
+    "YDEX",
+    # Временно скрыты до перехода на платный Groq Dev Tier
+    # (упираются в TPD 100k free-tier): HEAD, MTSS, GAZP, LKOH, ROSN, AFLT
 ]
 TRAINING_TIMEOUT = int(os.getenv("NIGHTLY_TRAIN_TIMEOUT", "10800"))  # 3 hours
 LLM_LOOKBACK_HOURS = int(os.getenv("NIGHTLY_LLM_LOOKBACK_HOURS", "12"))
