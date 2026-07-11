@@ -70,10 +70,149 @@ R² игнорируй — для returns близка к 0, не показат
 
 _LAST_GROQ_ERROR: Optional[str] = None
 _LAST_OLLAMA_ERROR: Optional[str] = None
+_LAST_GIGACHAT_ERROR: Optional[str] = None
 
 
 def get_last_errors() -> dict:
-    return {"groq": _LAST_GROQ_ERROR, "ollama": _LAST_OLLAMA_ERROR}
+    return {
+        "gigachat": _LAST_GIGACHAT_ERROR,
+        "groq": _LAST_GROQ_ERROR,
+        "ollama": _LAST_OLLAMA_ERROR,
+    }
+
+
+# ============================================================
+# GigaChat (Сбер) — приоритетный бэкенд, работает без прокси
+# ============================================================
+# Кэш access-токена OAuth (жизнь 30 мин)
+_GIGACHAT_TOKEN: Optional[str] = None
+_GIGACHAT_TOKEN_EXPIRES_AT: float = 0.0  # unix seconds
+
+_GIGACHAT_OAUTH_URL = "https://ngw.devices.sberbank.ru:9443/api/v2/oauth"
+_GIGACHAT_API_URL = "https://gigachat.devices.sberbank.ru/api/v1/chat/completions"
+
+
+def _get_gigachat_token() -> Optional[str]:
+    """OAuth-запрос. Токен кэшируется до истечения срока (30 мин)."""
+    global _GIGACHAT_TOKEN, _GIGACHAT_TOKEN_EXPIRES_AT, _LAST_GIGACHAT_ERROR
+
+    now = time.time()
+    if _GIGACHAT_TOKEN and now < _GIGACHAT_TOKEN_EXPIRES_AT - 60:
+        return _GIGACHAT_TOKEN
+
+    auth_key = (os.getenv("GIGACHAT_AUTH_KEY") or "").strip().strip('"').strip("'")
+    if not auth_key:
+        _LAST_GIGACHAT_ERROR = "GIGACHAT_AUTH_KEY не задан"
+        return None
+
+    scope = os.getenv("GIGACHAT_SCOPE", "GIGACHAT_API_PERS").strip()
+
+    import uuid
+    rq_uid = str(uuid.uuid4())
+
+    try:
+        resp = requests.post(
+            _GIGACHAT_OAUTH_URL,
+            headers={
+                "Content-Type": "application/x-www-form-urlencoded",
+                "Accept": "application/json",
+                "RqUID": rq_uid,
+                "Authorization": f"Basic {auth_key}",
+            },
+            data={"scope": scope},
+            timeout=15,
+        )
+        if resp.status_code != 200:
+            _LAST_GIGACHAT_ERROR = f"OAuth HTTP {resp.status_code}: {resp.text[:200]}"
+            return None
+        data = resp.json()
+        _GIGACHAT_TOKEN = data.get("access_token")
+        # expires_at приходит в миллисекундах
+        _GIGACHAT_TOKEN_EXPIRES_AT = data.get("expires_at", 0) / 1000.0
+        if not _GIGACHAT_TOKEN:
+            _LAST_GIGACHAT_ERROR = "OAuth: пустой access_token"
+            return None
+        return _GIGACHAT_TOKEN
+    except Exception as e:
+        _LAST_GIGACHAT_ERROR = f"OAuth {type(e).__name__}: {e}"
+        return None
+
+
+def _get_gigachat_response(user_message: str, system_prompt: Optional[str] = None,
+                           max_tokens: int = 250, temperature: float = 0.2) -> Optional[str]:
+    """
+    Универсальный вызов GigaChat. Возвращает текст ответа или None.
+    system_prompt=None → берём глобальный SYSTEM_PROMPT (для analyze_signal).
+    """
+    global _LAST_GIGACHAT_ERROR
+
+    token = _get_gigachat_token()
+    if not token:
+        return None
+
+    model = os.getenv("GIGACHAT_MODEL", "GigaChat").strip()
+    sys_prompt = system_prompt if system_prompt is not None else SYSTEM_PROMPT
+
+    try:
+        resp = requests.post(
+            _GIGACHAT_API_URL,
+            headers={
+                "Authorization": f"Bearer {token}",
+                "Content-Type": "application/json",
+                "Accept": "application/json",
+            },
+            json={
+                "model": model,
+                "messages": [
+                    {"role": "system", "content": sys_prompt},
+                    {"role": "user", "content": user_message},
+                ],
+                "max_tokens": max_tokens,
+                "temperature": temperature,
+            },
+            timeout=60,
+        )
+        if resp.status_code == 401:
+            # Токен протух между кэшем и запросом — сбросим и попробуем ещё раз
+            _GIGACHAT_TOKEN and _reset_gigachat_token()
+            token = _get_gigachat_token()
+            if not token:
+                return None
+            resp = requests.post(
+                _GIGACHAT_API_URL,
+                headers={
+                    "Authorization": f"Bearer {token}",
+                    "Content-Type": "application/json",
+                    "Accept": "application/json",
+                },
+                json={
+                    "model": model,
+                    "messages": [
+                        {"role": "system", "content": sys_prompt},
+                        {"role": "user", "content": user_message},
+                    ],
+                    "max_tokens": max_tokens,
+                    "temperature": temperature,
+                },
+                timeout=60,
+            )
+        if resp.status_code != 200:
+            _LAST_GIGACHAT_ERROR = f"HTTP {resp.status_code}: {resp.text[:200]}"
+            logger.error("GigaChat error: %s", _LAST_GIGACHAT_ERROR)
+            return None
+        data = resp.json()
+        _LAST_GIGACHAT_ERROR = None
+        return data["choices"][0]["message"]["content"].strip()
+    except Exception as e:
+        _LAST_GIGACHAT_ERROR = f"{type(e).__name__}: {e}"
+        logger.error("GigaChat error: %s", e)
+        return None
+
+
+def _reset_gigachat_token() -> None:
+    global _GIGACHAT_TOKEN, _GIGACHAT_TOKEN_EXPIRES_AT
+    _GIGACHAT_TOKEN = None
+    _GIGACHAT_TOKEN_EXPIRES_AT = 0.0
 
 
 def _get_groq_response(user_message: str) -> Optional[str]:
@@ -220,8 +359,12 @@ def analyze_signal(
         f"\nAGREE или DISAGREE? Кратко обоснуй."
     )
 
-    # Try Groq first, fall back to Ollama
-    raw = _get_groq_response(user_message) or _get_ollama_response(user_message)
+    # GigaChat (без прокси) → Groq (через SOCKS) → Ollama (локально)
+    raw = (
+        _get_gigachat_response(user_message, max_tokens=250, temperature=0.2)
+        or _get_groq_response(user_message)
+        or _get_ollama_response(user_message)
+    )
 
     if raw is None:
         errs = get_last_errors()
@@ -655,9 +798,12 @@ def generate_ticker_report(
         f"Подготовь отчёт строго в указанном формате."
     )
 
-    # ----- Запрос к LLM -----
-    raw = _get_groq_response_custom(user_message, REPORT_SYSTEM_PROMPT, max_tokens=600) \
+    # ----- Запрос к LLM (GigaChat → Groq → Ollama) -----
+    raw = (
+        _get_gigachat_response(user_message, REPORT_SYSTEM_PROMPT, max_tokens=600, temperature=0.3)
+        or _get_groq_response_custom(user_message, REPORT_SYSTEM_PROMPT, max_tokens=600)
         or _get_ollama_response_custom(user_message, REPORT_SYSTEM_PROMPT)
+    )
 
     if not raw:
         return {
@@ -899,7 +1045,8 @@ def summarize_ta_indicators(ticker: str, ta_indicators: dict) -> dict:
     user_message = f"Акция: {ticker}\nПоказатели: {'; '.join(parts)}\n\nДай вывод в требуемом формате."
 
     raw = (
-        _get_groq_response_custom(user_message, TA_SUMMARY_SYSTEM_PROMPT, max_tokens=200)
+        _get_gigachat_response(user_message, TA_SUMMARY_SYSTEM_PROMPT, max_tokens=200, temperature=0.3)
+        or _get_groq_response_custom(user_message, TA_SUMMARY_SYSTEM_PROMPT, max_tokens=200)
         or _get_ollama_response_custom(user_message, TA_SUMMARY_SYSTEM_PROMPT)
     )
     if not raw:
@@ -1001,7 +1148,8 @@ def explain_ta_indicators(ticker: str, ta_indicators: dict) -> dict:
     )
 
     raw = (
-        _get_groq_response_custom(user_message, TA_EXPLAIN_SYSTEM_PROMPT, max_tokens=350)
+        _get_gigachat_response(user_message, TA_EXPLAIN_SYSTEM_PROMPT, max_tokens=350, temperature=0.3)
+        or _get_groq_response_custom(user_message, TA_EXPLAIN_SYSTEM_PROMPT, max_tokens=350)
         or _get_ollama_response_custom(user_message, TA_EXPLAIN_SYSTEM_PROMPT)
     )
 
@@ -1016,20 +1164,20 @@ def explain_ta_indicators(ticker: str, ta_indicators: dict) -> dict:
 
 def _friendly_llm_error() -> str:
     """
-    Превращает сырой exception от Groq/Ollama в понятное пользователю сообщение.
-    Ollama-ошибки игнорируем — этот бэкенд у нас не поднят, они всегда одинаковые.
+    Превращает сырые exception'ы GigaChat/Groq в понятное сообщение.
+    Ollama игнорируем — этот бэкенд у нас не поднят.
     """
     errs = get_last_errors()
-    groq_err = (errs.get("groq") or "").lower()
-    if not groq_err:
-        return "AI-сервис временно недоступен, попробуйте позже."
-    if "timeout" in groq_err or "timed out" in groq_err:
-        return "AI-сервис временно недоступен (таймаут). Попробуйте обновить через минуту."
-    if "429" in groq_err or "rate" in groq_err or "quota" in groq_err:
+    joined = (
+        (errs.get("gigachat") or "") + " | " + (errs.get("groq") or "")
+    ).lower()
+    if "429" in joined or "rate" in joined or "quota" in joined or "limit" in joined:
         return "Дневной лимит запросов к AI исчерпан. Попробуйте позже."
-    if "401" in groq_err or "unauthorized" in groq_err or "invalid" in groq_err:
+    if "401" in joined or "unauthorized" in joined or "invalid_api_key" in joined:
         return "Ошибка авторизации AI-сервиса. Обратитесь к администратору."
-    if "connection" in groq_err or "network" in groq_err or "resolve" in groq_err:
+    if "timeout" in joined or "timed out" in joined:
+        return "AI-сервис временно недоступен (таймаут). Попробуйте обновить через минуту."
+    if "connection" in joined or "network" in joined or "resolve" in joined:
         return "AI-сервис временно недоступен (нет соединения). Попробуйте позже."
     return "AI-сервис временно недоступен, попробуйте позже."
 
