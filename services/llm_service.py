@@ -6,12 +6,19 @@ Supports:
 - Ollama (local): any model
 """
 import os
+import time
 import logging
 from typing import Optional
 
 import requests
 
 logger = logging.getLogger(__name__)
+
+# Настройки устойчивости Groq (нестабильный SOCKS-тоннель до US-VPS)
+_GROQ_MAX_ATTEMPTS = int(os.getenv("GROQ_MAX_ATTEMPTS", "4"))
+_GROQ_TIMEOUT = float(os.getenv("GROQ_TIMEOUT", "90"))
+_GROQ_SDK_RETRIES = int(os.getenv("GROQ_SDK_RETRIES", "3"))
+_GROQ_BACKOFF_SECONDS = [5, 15, 30]  # паузы между внешними попытками
 
 # LLM system prompt
 SYSTEM_PROMPT = """Ты — рецензент качества ML моделей.
@@ -78,24 +85,40 @@ def _get_groq_response(user_message: str) -> Optional[str]:
 
     model = os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile").strip().strip('"').strip("'")
 
-    try:
-        from groq import Groq
-        client = Groq(api_key=api_key)
-        completion = client.chat.completions.create(
-            model=model,
-            messages=[
-                {"role": "system", "content": SYSTEM_PROMPT},
-                {"role": "user", "content": user_message},
-            ],
-            max_tokens=250,
-            temperature=0.2,
-        )
-        _LAST_GROQ_ERROR = None
-        return completion.choices[0].message.content.strip()
-    except Exception as e:
-        _LAST_GROQ_ERROR = f"{type(e).__name__}: {e}"
-        logger.error("Groq API error (model=%s): %s", model, e)
-        return None
+    from groq import Groq
+    client = Groq(
+        api_key=api_key,
+        max_retries=_GROQ_SDK_RETRIES,
+        timeout=_GROQ_TIMEOUT,
+    )
+
+    last_err: Optional[Exception] = None
+    for attempt in range(_GROQ_MAX_ATTEMPTS):
+        try:
+            completion = client.chat.completions.create(
+                model=model,
+                messages=[
+                    {"role": "system", "content": SYSTEM_PROMPT},
+                    {"role": "user", "content": user_message},
+                ],
+                max_tokens=250,
+                temperature=0.2,
+            )
+            _LAST_GROQ_ERROR = None
+            return completion.choices[0].message.content.strip()
+        except Exception as e:
+            last_err = e
+            if attempt + 1 < _GROQ_MAX_ATTEMPTS:
+                wait = _GROQ_BACKOFF_SECONDS[min(attempt, len(_GROQ_BACKOFF_SECONDS) - 1)]
+                logger.warning(
+                    "Groq attempt %d/%d failed (%s). Retry in %ds",
+                    attempt + 1, _GROQ_MAX_ATTEMPTS, type(e).__name__, wait,
+                )
+                time.sleep(wait)
+
+    _LAST_GROQ_ERROR = f"{type(last_err).__name__}: {last_err}"
+    logger.error("Groq API error (model=%s): %s", model, last_err)
+    return None
 
 
 def _get_ollama_response(user_message: str) -> Optional[str]:
