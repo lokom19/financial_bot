@@ -334,9 +334,8 @@
         <!-- AI-объяснение технического анализа              -->
         <!-- ============================================== -->
         <div class="x-card" style="margin-bottom: 24px; background: linear-gradient(135deg, #faf7ff 0%, #f5f7ff 100%); border: 1px solid #e0e7ff;">
-            <h3 class="x-card-title" style="display: flex; align-items: center; justify-content: space-between;">
+            <h3 class="x-card-title">
                 <span>🤖 AI-объяснение технического анализа</span>
-                <button id="ta-explain-btn" onclick="explainTA(true)" class="x-btn" style="font-size: 11px; padding: 4px 10px;">↻ обновить</button>
             </h3>
             <div id="ta-explanation" style="font-size: 14px; line-height: 1.6; color: var(--text); white-space: pre-wrap;">
                 <span class="text-mute">Загрузка…</span>
@@ -945,28 +944,24 @@
         // ============================================================
         // AI-объяснение технического анализа
         // ============================================================
-        async function explainTA(force) {
+        async function explainTA() {
             const wrap = document.getElementById('ta-explanation');
             const meta = document.getElementById('ta-explain-meta');
-            const btn = document.getElementById('ta-explain-btn');
             wrap.innerHTML = '<span class="x-spinner"></span> <span class="text-mute">Запрашиваю объяснение у LLM…</span>';
             meta.textContent = '';
-            btn.disabled = true;
             try {
-                const url = `/api/ticker/${encodeURIComponent(TICKER)}/explain-ta${force ? '?force=1' : ''}`;
+                const url = `/api/ticker/${encodeURIComponent(TICKER)}/explain-ta`;
                 const resp = await fetch(url);
                 const data = await resp.json();
                 if (data.error) {
-                    wrap.innerHTML = `<span class="text-danger">⚠ ${data.error}</span>`;
+                    wrap.innerHTML = `<span class="text-mute">${data.error}</span>`;
                     return;
                 }
                 wrap.textContent = data.explanation;
                 const ts = data.generated_at ? new Date(data.generated_at).toLocaleString('ru-RU') : '';
-                meta.textContent = (data.cached ? '✓ из кеша' : '✓ только что') + (ts ? ` — ${ts}` : '');
+                meta.textContent = ts ? `Обновлено: ${ts}` : '';
             } catch (e) {
-                wrap.innerHTML = `<span class="text-danger">⚠ Сетевая ошибка: ${e.message}</span>`;
-            } finally {
-                btn.disabled = false;
+                wrap.innerHTML = `<span class="text-mute">Не удалось загрузить объяснение.</span>`;
             }
         }
 
@@ -1046,7 +1041,7 @@
         // При старте грузим всё AI-связанное
         function startTable() {
             loadAIHistory();
-            explainTA(false);
+            explainTA();
             loadNews();
             loadTASummary();
         }

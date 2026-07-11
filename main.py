@@ -814,10 +814,11 @@ def _get_or_create_today_report(db: Session, figi: str, ticker: str, data_date) 
 
 @app.get("/api/ticker/{ticker}/explain-ta", tags=["LLM"])
 @limiter.limit("30/hour")
-async def explain_ta(request: Request, ticker: str, force: bool = False):
+async def explain_ta(request: Request, ticker: str):
     """
     AI-объяснение текущих значений технических индикаторов простым языком.
-    Кеш в ticker_reports.ta_explanation_text. ?force=1 — перегенерировать.
+    Кеш в ticker_reports.ta_explanation_text. Если кеш есть — возвращаем его,
+    иначе генерируем один раз и сохраняем. Ручная перегенерация не поддерживается.
     """
     db = SyncSessionLocal()
     try:
@@ -838,7 +839,7 @@ async def explain_ta(request: Request, ticker: str, force: bool = False):
             db, figi, overview["ticker"], overview.get("data_date")
         )
 
-        if not force and report.ta_explanation_text:
+        if report.ta_explanation_text:
             return {
                 "ticker": overview["ticker"],
                 "data_date": overview.get("data_date"),
