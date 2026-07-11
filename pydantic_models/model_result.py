@@ -53,8 +53,12 @@ class ModelResult(Base):
 
     # LLM-валидация сигнала (ночной пайплайн)
     llm_signal = Column(String(20), nullable=True)  # AGREE / DISAGREE / UNAVAILABLE
-    llm_reasoning = Column(Text, nullable=True)     # Развёрнутое обоснование от LLM
+    llm_reasoning = Column(Text, nullable=True)     # Финальное обоснование (после авто-коррекции)
     llm_processed_at = Column(DateTime, nullable=True)
+    # Оригинал ответа LLM до нашей пост-обработки — чтобы пользователь мог увидеть,
+    # что реально сказала модель, когда наша rule-based-подстраховка её переопределила.
+    llm_raw_verdict = Column(String(20), nullable=True)
+    llm_raw_response = Column(Text, nullable=True)
 
     def __repr__(self):
         return f"<ModelResult(model='{self.model_name}', ticker='{self.ticker_name or self.db_name}', r2={self.test_r2})>"

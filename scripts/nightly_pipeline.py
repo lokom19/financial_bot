@@ -642,6 +642,8 @@ def process_llm_for_new_results(engine, figi_list: List[str]) -> dict:
                 )
                 answer = result["answer"]
                 reasoning = result.get("reasoning", "") or result.get("explanation", "")
+                raw_verdict = result.get("raw_verdict")
+                raw_response = result.get("raw_response")
                 stats[answer.lower()] = stats.get(answer.lower(), 0) + 1
 
                 session.execute(
@@ -649,12 +651,16 @@ def process_llm_for_new_results(engine, figi_list: List[str]) -> dict:
                         UPDATE public.model_results
                         SET llm_signal = :llm_signal,
                             llm_reasoning = :llm_reasoning,
+                            llm_raw_verdict = :llm_raw_verdict,
+                            llm_raw_response = :llm_raw_response,
                             llm_processed_at = :now
                         WHERE id = :id
                     """),
                     {
                         "llm_signal": answer,
                         "llm_reasoning": reasoning,
+                        "llm_raw_verdict": raw_verdict,
+                        "llm_raw_response": raw_response,
                         "now": datetime.utcnow(),
                         "id": row_id,
                     },

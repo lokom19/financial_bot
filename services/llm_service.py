@@ -367,17 +367,12 @@ def analyze_signal(
     )
 
     if raw is None:
-        errs = get_last_errors()
-        explanation_parts = []
-        if errs.get("groq"):
-            explanation_parts.append(f"Groq: {errs['groq']}")
-        if errs.get("ollama"):
-            explanation_parts.append(f"Ollama: {errs['ollama']}")
-        explanation = "; ".join(explanation_parts) or "LLM недоступен"
         return {
             "answer": "UNAVAILABLE",
             "reasoning": "",
-            "explanation": explanation,
+            "explanation": _friendly_llm_error(),
+            "raw_response": None,
+            "raw_verdict": None,
         }
 
     # Парсим вердикт + причину.
@@ -392,6 +387,8 @@ def analyze_signal(
             "answer": "UNAVAILABLE",
             "reasoning": raw[:500],
             "explanation": f"Неожиданный формат ответа LLM",
+            "raw_response": raw[:2000],
+            "raw_verdict": None,
         }
 
     # Извлекаем обоснование — всё, что после первой строки с вердиктом.
@@ -416,21 +413,26 @@ def analyze_signal(
     # Если LLM сказала противоположное — переопределяем и переписываем
     # обоснование с нуля (старый текст LLM мог содержать неверные числа).
     # ============================================================
+    raw_verdict_original = verdict  # что реально сказала LLM
+    raw_response_original = raw     # исходный текст ДО правки
     rule_verdict = _rule_based_verdict(models_data)
     if rule_verdict and rule_verdict != verdict:
-        verdict_llm = verdict  # сохраняем до перезаписи
         logger.warning(
             "LLM verdict (%s) противоречит правилам (%s). Оверрайжу.",
-            verdict_llm, rule_verdict,
+            verdict, rule_verdict,
         )
         verdict = rule_verdict
         rule_text = _build_rule_reasoning(models_data, rule_verdict)
-        reasoning = f"[Авто-коррекция] LLM сказала {verdict_llm}, по числам — {rule_verdict}. {rule_text}"
+        reasoning = f"[Авто-коррекция] LLM сказала {raw_verdict_original}, по числам — {rule_verdict}. {rule_text}"
 
     return {
         "answer": verdict,
         "reasoning": reasoning,
         "explanation": reasoning,
+        # оригинальный ответ модели (нужен UI-эндпоинту, чтобы показать
+        # что реально ответил ИИ до нашей пост-обработки)
+        "raw_response": raw_response_original[:2000],
+        "raw_verdict": raw_verdict_original,
     }
 
 

@@ -296,6 +296,15 @@
                                 <span class="src">— заключение LLM</span>
                             </div>
                             {% endif %}
+
+                            {% if file.llm_raw_response and file.llm_reasoning and '[Авто-коррекция]' in file.llm_reasoning %}
+                            <details style="margin-top: 8px; padding: 8px; background: #fff9e6; border: 1px solid #ffd94d; border-radius: 6px; font-size: 12px;">
+                                <summary style="cursor: pointer; color: #7a5c00; font-weight: 500;">
+                                    👀 Что реально сказала LLM ({{ file.llm_raw_verdict or '—' }})
+                                </summary>
+                                <div style="margin-top: 8px; white-space: pre-wrap; color: #444; line-height: 1.5;">{{ file.llm_raw_response }}</div>
+                            </details>
+                            {% endif %}
                         {% else %}
                             <button class="btn-llm" onclick="analyzeLLM({{ loop.index }}, {{ file.id }}, '{{ file.ticker }}', {{ file.current_price or 0 }}, '{{ file.signal }}', {{ file.r_squared or 0 }}, {{ file.accuracy or 50 }})">
                                 🤖 Получить вердикт

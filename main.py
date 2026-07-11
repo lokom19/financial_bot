@@ -226,6 +226,8 @@ async def llm_analyze(request: Request, payload: LLMAnalyzeRequest):
         if row and result.get("answer") and result["answer"] != "UNAVAILABLE":
             row.llm_signal = result["answer"]
             row.llm_reasoning = result.get("reasoning") or result.get("explanation") or ""
+            row.llm_raw_verdict = result.get("raw_verdict")
+            row.llm_raw_response = result.get("raw_response")
             row.llm_processed_at = _dt.utcnow()
             db.commit()
 
@@ -1310,6 +1312,8 @@ async def view_model(request: Request,
                     'max_drawdown': max_drawdown,
                     'llm_signal': result.llm_signal,
                     'llm_reasoning': result.llm_reasoning,
+                    'llm_raw_verdict': getattr(result, 'llm_raw_verdict', None),
+                    'llm_raw_response': getattr(result, 'llm_raw_response', None),
                     'llm_processed_at': result.llm_processed_at.strftime('%Y-%m-%d %H:%M') if result.llm_processed_at else None,
                 })
             except Exception as e:

@@ -119,6 +119,11 @@ def setup_database():
                 ("llm_signal", "VARCHAR(20)"),
                 ("llm_reasoning", "TEXT"),
                 ("llm_processed_at", "TIMESTAMP"),
+                # Оригинальный вердикт/ответ LLM ДО пост-обработки авто-коррекцией.
+                # Нужен, чтобы пользователь мог увидеть что реально сказала модель,
+                # если наш rule-based override переписал reasoning.
+                ("llm_raw_verdict", "VARCHAR(20)"),
+                ("llm_raw_response", "TEXT"),
                 # ticker_reports — добавляем колонки кеша LLM-ответов
             ]
             # отдельно для ticker_reports
