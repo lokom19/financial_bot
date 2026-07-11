@@ -660,13 +660,12 @@ def generate_ticker_report(
         or _get_ollama_response_custom(user_message, REPORT_SYSTEM_PROMPT)
 
     if not raw:
-        errs = get_last_errors()
         return {
             "verdict": "UNKNOWN",
             "confidence": "—",
             "sections": {},
             "report": "",
-            "error": "; ".join(f"{k}: {v}" for k, v in errs.items() if v) or "LLM недоступен",
+            "error": _friendly_llm_error(),
         }
 
     # ----- Парсинг разделов -----
@@ -904,11 +903,10 @@ def summarize_ta_indicators(ticker: str, ta_indicators: dict) -> dict:
         or _get_ollama_response_custom(user_message, TA_SUMMARY_SYSTEM_PROMPT)
     )
     if not raw:
-        errs = get_last_errors()
         return {
             "verdict": "UNKNOWN", "strength": "—",
             "summary": "", "key_indicators": "",
-            "error": "; ".join(f"{k}: {v}" for k, v in errs.items() if v) or "LLM недоступен",
+            "error": _friendly_llm_error(),
         }
 
     # Парсим разделы
@@ -1008,13 +1006,32 @@ def explain_ta_indicators(ticker: str, ta_indicators: dict) -> dict:
     )
 
     if not raw:
-        errs = get_last_errors()
         return {
             "explanation": "",
-            "error": "; ".join(f"{k}: {v}" for k, v in errs.items() if v) or "LLM недоступен",
+            "error": _friendly_llm_error(),
         }
 
     return {"explanation": raw.strip(), "error": None}
+
+
+def _friendly_llm_error() -> str:
+    """
+    Превращает сырой exception от Groq/Ollama в понятное пользователю сообщение.
+    Ollama-ошибки игнорируем — этот бэкенд у нас не поднят, они всегда одинаковые.
+    """
+    errs = get_last_errors()
+    groq_err = (errs.get("groq") or "").lower()
+    if not groq_err:
+        return "AI-сервис временно недоступен, попробуйте позже."
+    if "timeout" in groq_err or "timed out" in groq_err:
+        return "AI-сервис временно недоступен (таймаут). Попробуйте обновить через минуту."
+    if "429" in groq_err or "rate" in groq_err or "quota" in groq_err:
+        return "Дневной лимит запросов к AI исчерпан. Попробуйте позже."
+    if "401" in groq_err or "unauthorized" in groq_err or "invalid" in groq_err:
+        return "Ошибка авторизации AI-сервиса. Обратитесь к администратору."
+    if "connection" in groq_err or "network" in groq_err or "resolve" in groq_err:
+        return "AI-сервис временно недоступен (нет соединения). Попробуйте позже."
+    return "AI-сервис временно недоступен, попробуйте позже."
 
 
 def _get_groq_response_custom(user_message: str, system_prompt: str,
@@ -1028,24 +1045,40 @@ def _get_groq_response_custom(user_message: str, system_prompt: str,
 
     model = os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile").strip().strip('"').strip("'")
 
-    try:
-        from groq import Groq
-        client = Groq(api_key=api_key)
-        completion = client.chat.completions.create(
-            model=model,
-            messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_message},
-            ],
-            max_tokens=max_tokens,
-            temperature=0.3,
-        )
-        _LAST_GROQ_ERROR = None
-        return completion.choices[0].message.content.strip()
-    except Exception as e:
-        _LAST_GROQ_ERROR = f"{type(e).__name__}: {e}"
-        logger.error("Groq API error (model=%s): %s", model, e)
-        return None
+    from groq import Groq
+    client = Groq(
+        api_key=api_key,
+        max_retries=_GROQ_SDK_RETRIES,
+        timeout=_GROQ_TIMEOUT,
+    )
+
+    last_err: Optional[Exception] = None
+    for attempt in range(_GROQ_MAX_ATTEMPTS):
+        try:
+            completion = client.chat.completions.create(
+                model=model,
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_message},
+                ],
+                max_tokens=max_tokens,
+                temperature=0.3,
+            )
+            _LAST_GROQ_ERROR = None
+            return completion.choices[0].message.content.strip()
+        except Exception as e:
+            last_err = e
+            if attempt + 1 < _GROQ_MAX_ATTEMPTS:
+                wait = _GROQ_BACKOFF_SECONDS[min(attempt, len(_GROQ_BACKOFF_SECONDS) - 1)]
+                logger.warning(
+                    "Groq (custom) attempt %d/%d failed (%s). Retry in %ds",
+                    attempt + 1, _GROQ_MAX_ATTEMPTS, type(e).__name__, wait,
+                )
+                time.sleep(wait)
+
+    _LAST_GROQ_ERROR = f"{type(last_err).__name__}: {last_err}"
+    logger.error("Groq API error (model=%s): %s", model, last_err)
+    return None
 
 
 def _get_ollama_response_custom(user_message: str, system_prompt: str) -> Optional[str]:
