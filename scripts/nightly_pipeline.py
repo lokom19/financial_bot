@@ -49,10 +49,14 @@ TOP_TICKERS = [
     "SBER", "VTBR",
     # Ритейл / e-commerce
     "OZON",
-    # IT
-    "YDEX",
-    # Временно скрыты до перехода на платный Groq Dev Tier
-    # (упираются в TPD 100k free-tier): HEAD, MTSS, GAZP, LKOH, ROSN, AFLT
+    # IT / телеком
+    "YDEX", "MTSS",
+    # Нефтегаз
+    "GAZP",
+    # Транспорт
+    "AFLT",
+    # Временно скрыты (GigaChat справляется, но пока смотрим,
+    # как ложится нагрузка): HEAD, LKOH, ROSN
 ]
 TRAINING_TIMEOUT = int(os.getenv("NIGHTLY_TRAIN_TIMEOUT", "10800"))  # 3 hours
 LLM_LOOKBACK_HOURS = int(os.getenv("NIGHTLY_LLM_LOOKBACK_HOURS", "12"))
