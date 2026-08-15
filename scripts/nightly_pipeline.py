@@ -379,6 +379,33 @@ def generate_and_save_ticker_reports(engine, pairs):
                 print(f"   ⚠ Не удалось подтянуть новости по {ticker_name}: {e}")
                 news_items = None
 
+            # Последние 3 закрытых дня: прогноз vs факт из ticker_reports
+            try:
+                recent_rows = session.execute(text("""
+                    SELECT data_date, verdict, current_price, target_price,
+                           actual_close, correct_direction
+                    FROM public.ticker_reports
+                    WHERE figi = :figi
+                      AND actual_close IS NOT NULL
+                      AND verdict IS NOT NULL
+                    ORDER BY data_date DESC
+                    LIMIT 3
+                """), {"figi": figi}).fetchall()
+                recent_history = [
+                    {
+                        "date": str(r[0]),
+                        "verdict": r[1],
+                        "price_at_signal": float(r[2]) if r[2] else None,
+                        "target_price": float(r[3]) if r[3] else None,
+                        "actual_close": float(r[4]) if r[4] else None,
+                        "correct_direction": r[5],
+                    }
+                    for r in recent_rows
+                ]
+            except Exception as e:
+                print(f"   ⚠ Не удалось подтянуть историю прогнозов по {ticker_name}: {e}")
+                recent_history = []
+
             # Запрашиваем LLM на каждом прогоне (свежий вердикт)
             report = generate_ticker_report(
                 ticker=ticker_name,
@@ -388,6 +415,7 @@ def generate_and_save_ticker_reports(engine, pairs):
                 news_items=news_items,
                 data_date=data_date_iso,
                 prediction_date=prediction_d.isoformat() if prediction_d else None,
+                recent_history=recent_history or None,
             )
 
             params = {

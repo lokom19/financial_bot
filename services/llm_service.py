@@ -641,6 +641,7 @@ def generate_ticker_report(
     news_items: Optional[list] = None,
     data_date: Optional[str] = None,
     prediction_date: Optional[str] = None,
+    recent_history: Optional[list] = None,
 ) -> dict:
     """
     Генерирует развёрнутый отчёт по тикеру через LLM.
@@ -790,10 +791,39 @@ def generate_ticker_report(
             f"Прогноз делается на: {prediction_date or '?'} (следующий торговый день)\n\n"
         )
 
+    history_block = ""
+    if recent_history:
+        lines = []
+        for h in recent_history:
+            date = h.get("date", "?")
+            verdict = h.get("verdict", "?")
+            price_at = h.get("price_at_signal")
+            target = h.get("target_price")
+            actual = h.get("actual_close")
+            correct = h.get("correct_direction")
+
+            price_at_str = f"{price_at:.2f}" if price_at else "?"
+            target_str = f"{target:.2f}" if target else "?"
+            actual_str = f"{actual:.2f}" if actual else "?"
+
+            if correct is True:
+                result_str = "✓ верно"
+            elif correct is False:
+                result_str = "✗ неверно"
+            else:
+                result_str = "?"
+
+            lines.append(
+                f"  {date}: сигнал={verdict}, цена={price_at_str}, "
+                f"цель={target_str} → факт={actual_str} ({result_str})"
+            )
+        history_block = "=== ИСТОРИЯ ПОСЛЕДНИХ ПРОГНОЗОВ (AI-сигнал vs факт) ===\n" + "\n".join(lines) + "\n\n"
+
     user_message = (
         f"Тикер: {ticker}\n"
         f"Текущая цена (close на {data_date or '?'}): {current_price:.2f}\n"
         f"{dates_block}"
+        f"{history_block}"
         f"=== ПРОГНОЗЫ МОДЕЛЕЙ ===\n{models_block}\n\n"
         f"=== ТЕХНИЧЕСКИЙ АНАЛИЗ (на {data_date or '?'}) ===\n{ta_block}\n\n"
         f"=== НОВОСТНОЙ ФОН ===\n{news_block}\n\n"
