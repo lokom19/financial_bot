@@ -1,12 +1,14 @@
 """
 Новостной фид по российским акциям.
 
-Источник: smart-lab.ru (HTML-парсинг блока news).
-Для каждого тикера маппим на ключевые слова поиска.
+Источники (в порядке приоритета):
+  1. SearXNG (self-hosted metasearch) — актуальные новости из Google/Bing/Yandex
+  2. smart-lab.ru (HTML-парсинг) — фолбэк если SearXNG недоступен
 
 Кеш в памяти процесса на 30 минут (per-ticker).
 """
 import logging
+import os
 import re
 from datetime import datetime, timedelta
 from typing import List, Optional
@@ -16,7 +18,24 @@ from bs4 import BeautifulSoup
 
 logger = logging.getLogger(__name__)
 
-# Ключи поиска по тикерам (smart-lab ищет по русским формам)
+SEARXNG_URL = os.getenv("SEARXNG_URL", "http://searxng:8080")
+
+# Поисковые запросы для SearXNG (более точные, чем для smart-lab)
+TICKER_TO_SEARXNG_QUERY = {
+    "SBER":  "Сбербанк акции новости",
+    "OZON":  "Ozon акции новости",
+    "VTBR":  "ВТБ банк акции новости",
+    "GAZP":  "Газпром акции новости",
+    "LKOH":  "Лукойл акции новости",
+    "ROSN":  "Роснефть акции новости",
+    "YDEX":  "Яндекс акции новости",
+    "MTSS":  "МТС акции новости",
+    "AFLT":  "Аэрофлот акции новости",
+    "TCSG":  "Т-Банк ТКС акции новости",
+    "HEAD":  "HeadHunter акции новости",
+}
+
+# Ключи поиска для smart-lab (фолбэк)
 TICKER_TO_SEARCH = {
     "SBER":  "сбер",
     "OZON":  "ozon",
@@ -26,8 +45,10 @@ TICKER_TO_SEARCH = {
     "ROSN":  "роснефть",
     "TCSG":  "тинькофф",
     "YNDX":  "яндекс",
-    "MAGN":  "магнит",
-    "MGNT":  "магнит",
+    "YDEX":  "яндекс",
+    "MTSS":  "мтс",
+    "AFLT":  "аэрофлот",
+    "HEAD":  "headhunter",
 }
 
 MONTH_MAP = {
@@ -58,26 +79,63 @@ def _parse_smartlab_date(date_str: str) -> Optional[datetime]:
     return None
 
 
-def fetch_news_for_ticker(ticker: str, max_items: int = 5,
-                          max_pages: int = 2) -> List[dict]:
+def _fetch_searxng(ticker: str, max_items: int) -> List[dict]:
     """
-    Возвращает [{date: '2026-06-27', title: '...', url: '...', source: 'smart-lab'}].
-    Кеш 30 минут.
+    Запрашивает SearXNG JSON API.
+    Возвращает список новостей или [] при недоступности.
     """
-    cache_key = (ticker.upper(), max_items)
-    now = datetime.utcnow()
+    query = TICKER_TO_SEARXNG_QUERY.get(ticker.upper(), f"{ticker} акции новости")
+    try:
+        resp = requests.get(
+            f"{SEARXNG_URL}/search",
+            params={
+                "q": query,
+                "format": "json",
+                "categories": "news",
+                "language": "ru-RU",
+                "time_range": "week",
+            },
+            timeout=10,
+        )
+        if resp.status_code != 200:
+            logger.warning("SearXNG вернул %s для %s", resp.status_code, ticker)
+            return []
+        data = resp.json()
+        results = data.get("results") or []
+        news = []
+        for r in results:
+            title = (r.get("title") or "").strip()
+            url = r.get("url") or ""
+            if not title or not url:
+                continue
+            pub_date = None
+            raw_date = r.get("publishedDate") or ""
+            if raw_date:
+                try:
+                    pub_date = datetime.fromisoformat(raw_date.replace("Z", "+00:00")).date().isoformat()
+                except Exception:
+                    pass
+            news.append({
+                "date": pub_date,
+                "date_raw": raw_date[:30],
+                "title": title[:200],
+                "url": url,
+                "source": r.get("engine", "searxng"),
+            })
+            if len(news) >= max_items:
+                break
+        return news
+    except Exception as e:
+        logger.warning("SearXNG недоступен для %s: %s", ticker, e)
+        return []
 
-    cached = _CACHE.get(cache_key)
-    if cached:
-        ts, items = cached
-        if (now - ts).total_seconds() < _CACHE_TTL_SECONDS:
-            return items
 
+def _fetch_smartlab(ticker: str, max_items: int) -> List[dict]:
+    """HTML-парсинг smart-lab.ru (фолбэк)."""
     search = TICKER_TO_SEARCH.get(ticker.upper(), ticker.lower())
     headers = {'User-Agent': 'Mozilla/5.0'}
     all_news = []
-
-    for page in range(1, max_pages + 1):
+    for page in range(1, 3):
         url = (
             f"https://smart-lab.ru/search/topics/?blog=news&q={search}"
             if page == 1
@@ -91,7 +149,6 @@ def fetch_news_for_ticker(ticker: str, max_items: int = 5,
             topics = soup.find_all('div', class_=lambda x: x and 'topic' in (x or ''))
             if not topics:
                 break
-
             for t in topics:
                 title_elem = t.find('h2', class_='title')
                 if not title_elem:
@@ -103,11 +160,9 @@ def fetch_news_for_ticker(ticker: str, max_items: int = 5,
                 href = link.get('href') or ''
                 if href and not href.startswith('http'):
                     href = 'https://smart-lab.ru' + href
-
                 date_elem = t.find('li', class_='date')
                 date_raw = date_elem.get_text(strip=True)[:30] if date_elem else ''
                 pub = _parse_smartlab_date(date_raw)
-
                 all_news.append({
                     'date': pub.date().isoformat() if pub else None,
                     'date_raw': date_raw,
@@ -120,11 +175,33 @@ def fetch_news_for_ticker(ticker: str, max_items: int = 5,
             if len(all_news) >= max_items:
                 break
         except Exception as e:
-            logger.warning("news fetch error for %s: %s", ticker, e)
+            logger.warning("smart-lab fetch error for %s: %s", ticker, e)
             break
-
-    # Не кешируем пустые результаты — чтобы временные ошибки парсинга/сети
-    # не блокировали повторные попытки на 30 минут.
-    if all_news:
-        _CACHE[cache_key] = (now, all_news)
     return all_news
+
+
+def fetch_news_for_ticker(ticker: str, max_items: int = 5,
+                          max_pages: int = 2) -> List[dict]:
+    """
+    Возвращает [{date, title, url, source}].
+    Пробует SearXNG первым; если пусто — smart-lab.
+    Кеш 30 минут.
+    """
+    cache_key = (ticker.upper(), max_items)
+    now = datetime.utcnow()
+
+    cached = _CACHE.get(cache_key)
+    if cached:
+        ts, items = cached
+        if (now - ts).total_seconds() < _CACHE_TTL_SECONDS:
+            return items
+
+    news = _fetch_searxng(ticker, max_items)
+
+    if not news:
+        logger.info("SearXNG: нет результатов для %s, пробую smart-lab", ticker)
+        news = _fetch_smartlab(ticker, max_items)
+
+    if news:
+        _CACHE[cache_key] = (now, news)
+    return news

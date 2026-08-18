@@ -1,0 +1,29 @@
+use_default_settings: true
+
+server:
+  limiter: false
+  image_proxy: false
+  method: GET
+
+search:
+  safe_search: 0
+  default_lang: "ru-RU"
+  formats:
+    - html
+    - json
+
+# Включаем только новостные движки — остальные нам не нужны
+engines:
+  - name: google news
+    engine: google_news
+    disabled: false
+  - name: bing news
+    engine: bing_news
+    disabled: false
+  - name: duckduckgo news
+    engine: duckduckgo_news
+    disabled: false
+  - name: yandex news
+    engine: yandex
+    categories: news
+    disabled: false
