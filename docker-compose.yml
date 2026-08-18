@@ -227,7 +227,7 @@ services:
     environment:
       - SEARXNG_SECRET_KEY=${SEARXNG_SECRET_KEY:-change-me-in-production-32chars}
     volumes:
-      - ./searxng:/etc/searxng:ro
+      - ./searxng:/etc/searxng
     restart: unless-stopped
     networks: [internal]
 
