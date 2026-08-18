@@ -20,19 +20,20 @@ logger = logging.getLogger(__name__)
 
 SEARXNG_URL = os.getenv("SEARXNG_URL", "http://searxng:8080")
 
-# Поисковые запросы для SearXNG (более точные, чем для smart-lab)
+# Поисковые запросы для SearXNG.
+# Английские запросы: Brave Search (основной рабочий движок) лучше их обрабатывает.
 TICKER_TO_SEARXNG_QUERY = {
-    "SBER":  "Сбербанк акции новости",
-    "OZON":  "Ozon акции новости",
-    "VTBR":  "ВТБ банк акции новости",
-    "GAZP":  "Газпром акции новости",
-    "LKOH":  "Лукойл акции новости",
-    "ROSN":  "Роснефть акции новости",
-    "YDEX":  "Яндекс акции новости",
-    "MTSS":  "МТС акции новости",
-    "AFLT":  "Аэрофлот акции новости",
-    "TCSG":  "Т-Банк ТКС акции новости",
-    "HEAD":  "HeadHunter акции новости",
+    "SBER":  "Sberbank SBER stock news",
+    "OZON":  "Ozon OZON stock news",
+    "VTBR":  "VTB Bank VTBR stock news",
+    "GAZP":  "Gazprom GAZP stock news",
+    "LKOH":  "Lukoil LKOH stock news",
+    "ROSN":  "Rosneft ROSN stock news",
+    "YDEX":  "Yandex YDEX stock news",
+    "MTSS":  "MTS MTSS stock news Russia",
+    "AFLT":  "Aeroflot AFLT stock news",
+    "TCSG":  "T-Bank TCS Group TCSG stock news",
+    "HEAD":  "HeadHunter HEAD stock news",
 }
 
 # Ключи поиска для smart-lab (фолбэк)
@@ -91,8 +92,6 @@ def _fetch_searxng(ticker: str, max_items: int) -> List[dict]:
             params={
                 "q": query,
                 "format": "json",
-                "categories": "news",
-                "language": "ru-RU",
                 "time_range": "week",
             },
             timeout=10,
