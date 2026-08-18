@@ -226,6 +226,7 @@ services:
     container_name: arima_searxng
     environment:
       - SEARXNG_SECRET_KEY=${SEARXNG_SECRET_KEY:-change-me-in-production-32chars}
+      - SEARXNG_OUTGOING__PROXIES__ALL=${OUTBOUND_PROXY:-}
     volumes:
       - ./searxng:/etc/searxng
     restart: unless-stopped

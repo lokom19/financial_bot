@@ -13,18 +13,42 @@ search:
     - html
     - json
 
-# Включаем только новостные движки — остальные нам не нужны
+outgoing:
+  # Короткий таймаут — чтобы недоступные движки не вешали весь запрос
+  request_timeout: 6.0
+  max_request_timeout: 10.0
+  # Прокси берётся из env SEARXNG_OUTGOING__PROXIES__ALL (docker-compose)
+  # Пример: socks5h://172.17.0.1:1080
+
 engines:
+  # Отключаем движки которые блокируют VPS-IP (Google, Bing, DDG)
+  - name: google
+    disabled: true
   - name: google news
-    engine: google_news
-    disabled: false
+    disabled: true
+  - name: bing
+    disabled: true
   - name: bing news
-    engine: bing_news
-    disabled: false
+    disabled: true
+  - name: duckduckgo
+    disabled: true
   - name: duckduckgo news
-    engine: duckduckgo_news
-    disabled: false
+    disabled: true
+  - name: wikidata
+    disabled: true
+  - name: wikipedia
+    disabled: true
+
+  # Оставляем те что стабильно работают с VPS
   - name: yandex news
     engine: yandex
+    categories: news
+    disabled: false
+  - name: brave
+    engine: brave
+    categories: news
+    disabled: false
+  - name: mojeek
+    engine: mojeek
     categories: news
     disabled: false
