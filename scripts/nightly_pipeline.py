@@ -179,12 +179,16 @@ def resolve_ticker_reports(engine):
                 LIMIT 1
             """), {"pd": pred_date}).fetchone()
 
-            if not bar:
-                # Не наступил торговый день → пробуем сдвинуть на +1
+            # Прокручиваем вперёд через все нерабочие дни за один проход.
+            # Без этого цикла каждый запуск пайплайна сдвигал бы дату
+            # только на +1, и после 2-х выходных потребовалось бы 2 лишних
+            # запуска, чтобы дойти до реальной торговой свечи.
+            deleted = False
+            while not bar:
                 new_pd = pred_date + timedelta(days=1)
                 # 1) не сдвигаем в будущее дальше сегодня — просто ждём
                 if new_pd > today:
-                    continue
+                    break
                 # 2) слишком старая запись — удаляем
                 if (today - pred_date).days > MAX_ROLLOVER_DAYS:
                     session.execute(
@@ -192,7 +196,8 @@ def resolve_ticker_reports(engine):
                         {"i": rep_id},
                     )
                     dropped += 1
-                    continue
+                    deleted = True
+                    break
                 # 3) конфликт: уже есть запись за new_pd для этого тикера
                 conflict_id = session.execute(text("""
                     SELECT id FROM public.ticker_reports
@@ -204,13 +209,22 @@ def resolve_ticker_reports(engine):
                         {"i": rep_id},
                     )
                     dropped += 1
-                else:
-                    session.execute(text("""
-                        UPDATE public.ticker_reports
-                        SET prediction_date = :pd
-                        WHERE id = :i
-                    """), {"pd": new_pd, "i": rep_id})
-                    rolled += 1
+                    deleted = True
+                    break
+                pred_date = new_pd
+                rolled += 1
+                session.execute(text("""
+                    UPDATE public.ticker_reports
+                    SET prediction_date = :pd
+                    WHERE id = :i
+                """), {"pd": pred_date, "i": rep_id})
+                bar = session.execute(text(f"""
+                    SELECT timestamp::date, close, high, low
+                    FROM all_dfs."{figi}"
+                    WHERE timestamp::date = :pd
+                    LIMIT 1
+                """), {"pd": pred_date}).fetchone()
+            if deleted or not bar:
                 continue
 
             bar_date, close_p, high_p, low_p = bar
