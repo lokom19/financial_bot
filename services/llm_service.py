@@ -776,10 +776,13 @@ def generate_ticker_report(
             ta_block = "; ".join(parts)
 
     if news_items:
-        news_lines = [
-            f"  - {n.get('date','?')}: {n.get('title','')[:140]}"
-            for n in news_items[:5]
-        ]
+        news_lines = []
+        for n in news_items[:5]:
+            line = f"  - {n.get('date','?')}: {n.get('title','')[:140]}"
+            snippet = (n.get("snippet") or "").strip()
+            if snippet:
+                line += f"\n    {snippet[:250]}"
+            news_lines.append(line)
         news_block = "\n".join(news_lines)
     else:
         news_block = "новостных данных нет"

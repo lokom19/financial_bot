@@ -118,6 +118,7 @@ def _fetch_searxng(ticker: str, max_items: int) -> List[dict]:
                 "date": pub_date,
                 "date_raw": raw_date[:30],
                 "title": title[:200],
+                "snippet": (r.get("content") or "")[:300],
                 "url": url,
                 "source": r.get("engine", "searxng"),
             })
