@@ -912,7 +912,9 @@ async def ta_summary(request: Request, ticker: str, force: bool = False):
         if not force and report.ta_summary_json:
             try:
                 cached = json.loads(report.ta_summary_json)
-                return {**cached, "cached": True}
+                # Не отдаём кеш если LLM ранее не смог дать вердикт
+                if cached.get("verdict") not in (None, "", "UNKNOWN"):
+                    return {**cached, "cached": True}
             except Exception:
                 pass  # битый JSON → перегенерируем
 

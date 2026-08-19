@@ -1112,7 +1112,62 @@ def summarize_ta_indicators(ticker: str, ta_indicators: dict) -> dict:
     if m:
         result["key_indicators"] = m.group(1).strip()
 
+    # Если LLM не дал читаемый вердикт — считаем по числам
+    if result["verdict"] == "UNKNOWN":
+        result = _ta_rule_based_summary(ta_indicators)
+
     return result
+
+
+def _ta_rule_based_summary(ta: dict) -> dict:
+    """Rule-based fallback когда LLM не справился с форматом."""
+    bull, bear = 0, 0
+    signals = []
+
+    rsi = ta.get("rsi")
+    if rsi is not None:
+        if rsi < 35:
+            bull += 2; signals.append(f"RSI={rsi:.0f} (перепродан)")
+        elif rsi > 65:
+            bear += 2; signals.append(f"RSI={rsi:.0f} (перекуплен)")
+
+    macd = ta.get("macd"); macd_sig = ta.get("macd_signal")
+    if macd is not None and macd_sig is not None:
+        if macd > macd_sig:
+            bull += 1; signals.append("MACD выше сигнала")
+        else:
+            bear += 1; signals.append("MACD ниже сигнала")
+
+    sma5 = ta.get("sma_5"); sma20 = ta.get("sma_20")
+    if sma5 is not None and sma20 is not None:
+        if sma5 > sma20:
+            bull += 1; signals.append(f"SMA5>{sma20:.0f}")
+        else:
+            bear += 1; signals.append(f"SMA5<{sma20:.0f}")
+
+    bb = ta.get("bb_position")
+    if bb is not None:
+        if bb < 0.25:
+            bull += 1; signals.append(f"BB={bb:.2f} (низ канала)")
+        elif bb > 0.75:
+            bear += 1; signals.append(f"BB={bb:.2f} (верх канала)")
+
+    total = bull + bear
+    if total == 0:
+        verdict, strength = "НЕЙТРАЛЬНЫЙ", "слабый"
+    elif bull > bear * 1.5:
+        verdict = "БЫЧИЙ"
+        strength = "сильный" if bull >= 4 else "умеренный"
+    elif bear > bull * 1.5:
+        verdict = "МЕДВЕЖИЙ"
+        strength = "сильный" if bear >= 4 else "умеренный"
+    else:
+        verdict, strength = "СМЕШАННЫЙ", "умеренный"
+
+    key = ", ".join(signals[:3]) if signals else "—"
+    summary = f"{verdict.capitalize()} сигнал по индикаторам (bull={bull}, bear={bear})."
+    return {"verdict": verdict, "strength": strength,
+            "summary": summary, "key_indicators": key, "error": None}
 
 
 TA_EXPLAIN_SYSTEM_PROMPT = """Ты — опытный технический аналитик. Объясняй простым языком новичкам.
