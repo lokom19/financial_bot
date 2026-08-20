@@ -60,6 +60,13 @@ _SKIP_DOMAINS = {
     "bcs-express.ru",
 }
 
+# URL-паттерны страниц котировок — не статьи, пропускаем
+_SKIP_URL_RE = re.compile(
+    r'/quote/|/котировки|/ticker(?:/|$)|/stocks?(?:/|$)'
+    r'|/chart(?:/|$)|/price(?:/|$)|/акции/[A-Z]{3,5}/?$',
+    re.I,
+)
+
 # Домены с пейволлом или блокировкой ботов — держим SearXNG-сниппет, URL не качаем
 _NO_FETCH_DOMAINS = {
     "vedomosti.ru", "bloomberg.com", "reuters.com",
@@ -188,6 +195,9 @@ def _fetch_searxng(ticker: str, max_items: int) -> List[dict]:
                 continue
             if _in_domains(url, _SKIP_DOMAINS):
                 logger.debug("skip domain: %s", _get_host(url))
+                continue
+            if _SKIP_URL_RE.search(url):
+                logger.debug("skip url pattern: %s", url[:80])
                 continue
             pub_date = None
             raw_date = r.get("publishedDate") or ""
