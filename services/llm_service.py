@@ -786,7 +786,7 @@ def generate_ticker_report(
             line = f"  - {prefix}: {n.get('title','')[:140]}" if prefix else f"  - {n.get('title','')[:140]}"
             snippet = (n.get("snippet") or "").strip()
             if snippet:
-                line += f"\n    {snippet[:4000]}"
+                line += f"\n    {snippet[:3000]}"
             news_lines.append(line)
         news_block = "\n".join(news_lines)
     else:
