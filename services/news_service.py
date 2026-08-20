@@ -87,7 +87,7 @@ def _is_blocked_domain(url: str) -> bool:
         return False
 
 
-def _fetch_url_content(url: str, max_chars: int = 600) -> str:
+def _fetch_url_content(url: str, max_chars: int = 1000) -> str:
     """
     Загружает страницу и извлекает основной текст статьи.
     Возвращает первые max_chars символов или '' при ошибке.
