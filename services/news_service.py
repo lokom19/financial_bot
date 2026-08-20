@@ -58,12 +58,15 @@ _SKIP_DOMAINS = {
     "moex.com", "finance.yahoo.com",
     "t-bank.ru", "tbank.ru", "tinkoff.ru",
     "bcs-express.ru",
+    "investmint.ru", "profinansy.ru",
 }
 
-# URL-паттерны страниц котировок — не статьи, пропускаем
+# URL-паттерны не-статейных страниц — котировки, форумы, теги, инструменты
 _SKIP_URL_RE = re.compile(
     r'/quote/|/котировки|/ticker(?:/|$)|/stocks?(?:/|$)'
-    r'|/chart(?:/|$)|/price(?:/|$)|/акции/[A-Z]{3,5}/?$',
+    r'|/chart(?:/|$)|/price(?:/|$)|/акции/[A-Z]{3,5}/?$'
+    r'|/forum/[A-Z]|/tegi/|/tag(?:s)?/|/market/instrument/'
+    r'|/instrument/|/topic(?:s)?/[A-Z]',
     re.I,
 )
 
@@ -135,7 +138,7 @@ def _fetch_url_content(url: str, max_chars: int = 5000) -> str:
         parts, total = [], 0
         for p in container.find_all("p"):
             t = p.get_text(" ", strip=True)
-            if len(t) < 40:
+            if len(t) < 20:
                 continue
             parts.append(t)
             total += len(t)
