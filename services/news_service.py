@@ -2,7 +2,7 @@
 Новостной фид по российским акциям.
 
 Источники (в порядке приоритета):
-  1. SearXNG (self-hosted metasearch) — актуальные новости из Google/Bing/Yandex
+  1. SearXNG (self-hosted metasearch) — актуальные новости из Brave/Yandex
   2. smart-lab.ru (HTML-парсинг) — фолбэк если SearXNG недоступен
 
 Кеш в памяти процесса на 30 минут (per-ticker).
@@ -10,8 +10,9 @@
 import logging
 import os
 import re
-from datetime import datetime, timedelta
+from datetime import datetime
 from typing import List, Optional
+from urllib.parse import urlparse
 
 import requests
 from bs4 import BeautifulSoup
@@ -20,20 +21,18 @@ logger = logging.getLogger(__name__)
 
 SEARXNG_URL = os.getenv("SEARXNG_URL", "http://searxng:8080")
 
-# Поисковые запросы для SearXNG.
-# Английские запросы: Brave Search (основной рабочий движок) лучше их обрабатывает.
 TICKER_TO_SEARXNG_QUERY = {
-    "SBER":  "Sberbank SBER stock news",
-    "OZON":  "Ozon OZON stock news",
-    "VTBR":  "VTB Bank VTBR stock news",
-    "GAZP":  "Gazprom GAZP stock news",
-    "LKOH":  "Lukoil LKOH stock news",
-    "ROSN":  "Rosneft ROSN stock news",
-    "YDEX":  "Yandex YDEX stock news",
-    "MTSS":  "MTS MTSS stock news Russia",
-    "AFLT":  "Aeroflot AFLT stock news",
-    "TCSG":  "T-Bank TCS Group TCSG stock news",
-    "HEAD":  "HeadHunter HEAD stock news",
+    "SBER":  "Сбербанк акции новости",
+    "OZON":  "Озон OZON акции новости",
+    "VTBR":  "ВТБ банк акции новости",
+    "GAZP":  "Газпром акции новости",
+    "LKOH":  "Лукойл акции новости",
+    "ROSN":  "Роснефть акции новости",
+    "YDEX":  "Яндекс акции новости",
+    "MTSS":  "МТС акции новости",
+    "AFLT":  "Аэрофлот акции новости",
+    "TCSG":  "Т-Банк ТКС акции новости",
+    "HEAD":  "HeadHunter Хедхантер акции новости",
 }
 
 # Ключи поиска для smart-lab (фолбэк)
@@ -52,6 +51,21 @@ TICKER_TO_SEARCH = {
     "HEAD":  "headhunter",
 }
 
+# Домены-агрегаторы котировок — не новости, убираем из результатов целиком
+_SKIP_DOMAINS = {
+    "investing.com", "ru.investing.com",
+    "tradingview.com", "ru.tradingview.com",
+    "moex.com", "finance.yahoo.com",
+    "t-bank.ru", "tinkoff.ru",
+    "bcs-express.ru",  # часто просто котировки
+}
+
+# Домены с пейволлом или блокировкой ботов — держим SearXNG-сниппет, URL не качаем
+_NO_FETCH_DOMAINS = {
+    "vedomosti.ru", "bloomberg.com", "reuters.com",
+    "wsj.com", "ft.com", "kommersant.ru",
+}
+
 _FETCH_HEADERS = {
     "User-Agent": (
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
@@ -59,12 +73,6 @@ _FETCH_HEADERS = {
         "Chrome/124.0.0.0 Safari/537.36"
     ),
     "Accept-Language": "ru-RU,ru;q=0.9,en;q=0.8",
-}
-
-# Домены, которые всегда блокируют боты — не тратим время на них
-_BLOCKED_DOMAINS = {
-    "investing.com", "tradingview.com", "tinkoff.ru", "t-bank.ru",
-    "moex.com", "finam.ru", "bloomberg.com", "reuters.com",
 }
 
 MONTH_MAP = {
@@ -78,21 +86,24 @@ _CACHE: dict = {}
 _CACHE_TTL_SECONDS = 30 * 60
 
 
-def _is_blocked_domain(url: str) -> bool:
+def _get_host(url: str) -> str:
     try:
-        from urllib.parse import urlparse
-        host = urlparse(url).hostname or ""
-        return any(host == d or host.endswith("." + d) for d in _BLOCKED_DOMAINS)
+        return urlparse(url).hostname or ""
     except Exception:
-        return False
+        return ""
+
+
+def _in_domains(url: str, domain_set: set) -> bool:
+    host = _get_host(url)
+    return any(host == d or host.endswith("." + d) for d in domain_set)
 
 
 def _fetch_url_content(url: str, max_chars: int = 1000) -> str:
     """
-    Загружает страницу и извлекает основной текст статьи.
-    Возвращает первые max_chars символов или '' при ошибке.
+    Загружает страницу статьи и извлекает основной текст.
+    Возвращает первые max_chars символов или '' при ошибке/блокировке.
     """
-    if _is_blocked_domain(url):
+    if _in_domains(url, _SKIP_DOMAINS | _NO_FETCH_DOMAINS):
         return ""
     try:
         resp = requests.get(url, headers=_FETCH_HEADERS, timeout=7, allow_redirects=True)
@@ -101,12 +112,10 @@ def _fetch_url_content(url: str, max_chars: int = 1000) -> str:
         resp.encoding = resp.apparent_encoding or "utf-8"
         soup = BeautifulSoup(resp.text, "lxml")
 
-        # убираем мусор
         for tag in soup(["script", "style", "nav", "header", "footer",
                           "aside", "form", "noscript", "figure"]):
             tag.decompose()
 
-        # ищем основной контент по приоритету
         container = (
             soup.find("article")
             or soup.find("main")
@@ -116,20 +125,17 @@ def _fetch_url_content(url: str, max_chars: int = 1000) -> str:
         if not container:
             return ""
 
-        paragraphs = container.find_all("p")
-        text_parts = []
-        total = 0
-        for p in paragraphs:
+        parts, total = [], 0
+        for p in container.find_all("p"):
             t = p.get_text(" ", strip=True)
-            if len(t) < 40:  # пропускаем очень короткие фрагменты (подписи, метки)
+            if len(t) < 40:
                 continue
-            text_parts.append(t)
+            parts.append(t)
             total += len(t)
             if total >= max_chars:
                 break
 
-        full = " ".join(text_parts)
-        return full[:max_chars].strip()
+        return " ".join(parts)[:max_chars].strip()
     except Exception as e:
         logger.debug("fetch_url_content failed for %s: %s", url, e)
         return ""
@@ -155,7 +161,8 @@ def _parse_smartlab_date(date_str: str) -> Optional[datetime]:
 def _fetch_searxng(ticker: str, max_items: int) -> List[dict]:
     """
     Запрашивает SearXNG JSON API.
-    Возвращает список новостей или [] при недоступности.
+    Запрашивает max_items*3 результатов, фильтрует мусорные домены,
+    возвращает до max_items записей или [] при недоступности.
     """
     query = TICKER_TO_SEARXNG_QUERY.get(ticker.upper(), f"{ticker} акции новости")
     try:
@@ -179,6 +186,9 @@ def _fetch_searxng(ticker: str, max_items: int) -> List[dict]:
             url = r.get("url") or ""
             if not title or not url:
                 continue
+            if _in_domains(url, _SKIP_DOMAINS):
+                logger.debug("skip domain: %s", _get_host(url))
+                continue
             pub_date = None
             raw_date = r.get("publishedDate") or ""
             if raw_date:
@@ -190,7 +200,7 @@ def _fetch_searxng(ticker: str, max_items: int) -> List[dict]:
                 "date": pub_date,
                 "date_raw": raw_date[:30],
                 "title": title[:200],
-                "snippet": (r.get("content") or "")[:300],
+                "snippet": (r.get("content") or "")[:400],
                 "url": url,
                 "source": r.get("engine", "searxng"),
             })
@@ -239,6 +249,7 @@ def _fetch_smartlab(ticker: str, max_items: int) -> List[dict]:
                     'date': pub.date().isoformat() if pub else None,
                     'date_raw': date_raw,
                     'title': title[:200],
+                    'snippet': '',
                     'url': href,
                     'source': 'smart-lab',
                 })
@@ -255,8 +266,7 @@ def _fetch_smartlab(ticker: str, max_items: int) -> List[dict]:
 def _enrich_with_content(news: List[dict]) -> List[dict]:
     """
     Для каждой новости пробует загрузить страницу и заменить snippet
-    на реальный текст статьи. Работает последовательно, пропускает
-    заблокированные домены и падения по таймауту.
+    на реальный текст статьи.
     """
     for item in news:
         url = item.get("url", "")
@@ -266,7 +276,7 @@ def _enrich_with_content(news: List[dict]) -> List[dict]:
         fetched = _fetch_url_content(url)
         if fetched and len(fetched) > len(existing):
             item["snippet"] = fetched
-            logger.debug("enriched snippet for %s (%d chars)", url[:60], len(fetched))
+            logger.debug("enriched %d chars from %s", len(fetched), url[:60])
     return news
 
 
@@ -275,8 +285,8 @@ def fetch_news_for_ticker(ticker: str, max_items: int = 5,
                           enrich_content: bool = True) -> List[dict]:
     """
     Возвращает [{date, title, url, snippet, source}].
-    Пробует SearXNG первым; если пусто — smart-lab.
-    Опционально обогащает snippet полным текстом статьи (fetch URL).
+    Пробует SearXNG первым (русскоязычные запросы, фильтрация мусорных доменов);
+    если пусто — smart-lab. Опционально обогащает snippet текстом статьи.
     Кеш 30 минут.
     """
     cache_key = (ticker.upper(), max_items)
