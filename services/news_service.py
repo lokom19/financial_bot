@@ -56,8 +56,8 @@ _SKIP_DOMAINS = {
     "investing.com", "ru.investing.com",
     "tradingview.com", "ru.tradingview.com",
     "moex.com", "finance.yahoo.com",
-    "t-bank.ru", "tinkoff.ru",
-    "bcs-express.ru",  # часто просто котировки
+    "t-bank.ru", "tbank.ru", "tinkoff.ru",
+    "bcs-express.ru",
 }
 
 # Домены с пейволлом или блокировкой ботов — держим SearXNG-сниппет, URL не качаем
@@ -98,7 +98,7 @@ def _in_domains(url: str, domain_set: set) -> bool:
     return any(host == d or host.endswith("." + d) for d in domain_set)
 
 
-def _fetch_url_content(url: str, max_chars: int = 1000) -> str:
+def _fetch_url_content(url: str, max_chars: int = 5000) -> str:
     """
     Загружает страницу статьи и извлекает основной текст.
     Возвращает первые max_chars символов или '' при ошибке/блокировке.
