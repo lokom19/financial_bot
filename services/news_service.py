@@ -52,6 +52,21 @@ TICKER_TO_SEARCH = {
     "HEAD":  "headhunter",
 }
 
+_FETCH_HEADERS = {
+    "User-Agent": (
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+        "AppleWebKit/537.36 (KHTML, like Gecko) "
+        "Chrome/124.0.0.0 Safari/537.36"
+    ),
+    "Accept-Language": "ru-RU,ru;q=0.9,en;q=0.8",
+}
+
+# Домены, которые всегда блокируют боты — не тратим время на них
+_BLOCKED_DOMAINS = {
+    "investing.com", "tradingview.com", "tinkoff.ru", "t-bank.ru",
+    "moex.com", "finam.ru", "bloomberg.com", "reuters.com",
+}
+
 MONTH_MAP = {
     'января': 1, 'февраля': 2, 'марта': 3, 'апреля': 4,
     'мая': 5, 'июня': 6, 'июля': 7, 'августа': 8,
@@ -61,6 +76,63 @@ MONTH_MAP = {
 # In-memory кеш: {(ticker, max_items): (timestamp_loaded, [news])}
 _CACHE: dict = {}
 _CACHE_TTL_SECONDS = 30 * 60
+
+
+def _is_blocked_domain(url: str) -> bool:
+    try:
+        from urllib.parse import urlparse
+        host = urlparse(url).hostname or ""
+        return any(host == d or host.endswith("." + d) for d in _BLOCKED_DOMAINS)
+    except Exception:
+        return False
+
+
+def _fetch_url_content(url: str, max_chars: int = 600) -> str:
+    """
+    Загружает страницу и извлекает основной текст статьи.
+    Возвращает первые max_chars символов или '' при ошибке.
+    """
+    if _is_blocked_domain(url):
+        return ""
+    try:
+        resp = requests.get(url, headers=_FETCH_HEADERS, timeout=7, allow_redirects=True)
+        if resp.status_code != 200:
+            return ""
+        resp.encoding = resp.apparent_encoding or "utf-8"
+        soup = BeautifulSoup(resp.text, "lxml")
+
+        # убираем мусор
+        for tag in soup(["script", "style", "nav", "header", "footer",
+                          "aside", "form", "noscript", "figure"]):
+            tag.decompose()
+
+        # ищем основной контент по приоритету
+        container = (
+            soup.find("article")
+            or soup.find("main")
+            or soup.find(class_=re.compile(r"article|content|body|text|post", re.I))
+            or soup.body
+        )
+        if not container:
+            return ""
+
+        paragraphs = container.find_all("p")
+        text_parts = []
+        total = 0
+        for p in paragraphs:
+            t = p.get_text(" ", strip=True)
+            if len(t) < 40:  # пропускаем очень короткие фрагменты (подписи, метки)
+                continue
+            text_parts.append(t)
+            total += len(t)
+            if total >= max_chars:
+                break
+
+        full = " ".join(text_parts)
+        return full[:max_chars].strip()
+    except Exception as e:
+        logger.debug("fetch_url_content failed for %s: %s", url, e)
+        return ""
 
 
 def _parse_smartlab_date(date_str: str) -> Optional[datetime]:
@@ -180,11 +252,31 @@ def _fetch_smartlab(ticker: str, max_items: int) -> List[dict]:
     return all_news
 
 
-def fetch_news_for_ticker(ticker: str, max_items: int = 5,
-                          max_pages: int = 2) -> List[dict]:
+def _enrich_with_content(news: List[dict]) -> List[dict]:
     """
-    Возвращает [{date, title, url, source}].
+    Для каждой новости пробует загрузить страницу и заменить snippet
+    на реальный текст статьи. Работает последовательно, пропускает
+    заблокированные домены и падения по таймауту.
+    """
+    for item in news:
+        url = item.get("url", "")
+        if not url:
+            continue
+        existing = (item.get("snippet") or "").strip()
+        fetched = _fetch_url_content(url)
+        if fetched and len(fetched) > len(existing):
+            item["snippet"] = fetched
+            logger.debug("enriched snippet for %s (%d chars)", url[:60], len(fetched))
+    return news
+
+
+def fetch_news_for_ticker(ticker: str, max_items: int = 5,
+                          max_pages: int = 2,
+                          enrich_content: bool = True) -> List[dict]:
+    """
+    Возвращает [{date, title, url, snippet, source}].
     Пробует SearXNG первым; если пусто — smart-lab.
+    Опционально обогащает snippet полным текстом статьи (fetch URL).
     Кеш 30 минут.
     """
     cache_key = (ticker.upper(), max_items)
@@ -201,6 +293,9 @@ def fetch_news_for_ticker(ticker: str, max_items: int = 5,
     if not news:
         logger.info("SearXNG: нет результатов для %s, пробую smart-lab", ticker)
         news = _fetch_smartlab(ticker, max_items)
+
+    if news and enrich_content:
+        news = _enrich_with_content(news)
 
     if news:
         _CACHE[cache_key] = (now, news)
