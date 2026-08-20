@@ -145,6 +145,18 @@ def _fetch_url_content(url: str, max_chars: int = 5000) -> str:
             if total >= max_chars:
                 break
 
+        # фолбэк: сайт использует <div> вместо <p> (smart-lab и др.)
+        if not parts:
+            raw = container.get_text("\n", strip=True)
+            for line in raw.split("\n"):
+                line = line.strip()
+                if len(line) < 20:
+                    continue
+                parts.append(line)
+                total += len(line)
+                if total >= max_chars:
+                    break
+
         return " ".join(parts)[:max_chars].strip()
     except Exception as e:
         logger.debug("fetch_url_content failed for %s: %s", url, e)
