@@ -1,3 +1,4 @@
+import asyncio
 import logging
 import os
 import re
@@ -875,7 +876,7 @@ async def explain_ta(request: Request, ticker: str):
 async def ticker_news(request: Request, ticker: str, limit: int = 5):
     """Новостной фид по тикеру (smart-lab.ru, кеш 30 мин)."""
     try:
-        items = fetch_news_for_ticker(ticker.upper(), max_items=limit)
+        items = await asyncio.to_thread(fetch_news_for_ticker, ticker.upper(), max_items=limit)
         return {"ticker": ticker.upper(), "items": items, "count": len(items)}
     except Exception as e:
         logger.error(f"news endpoint error: {e}")

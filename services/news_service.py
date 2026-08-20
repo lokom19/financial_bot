@@ -10,6 +10,7 @@
 import logging
 import os
 import re
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
 from typing import List, Optional
 from urllib.parse import urlparse
@@ -294,19 +295,27 @@ def _fetch_smartlab(ticker: str, max_items: int) -> List[dict]:
 
 def _enrich_with_content(news: List[dict]) -> List[dict]:
     """
-    Для каждой новости пробует загрузить страницу и заменить snippet
-    на реальный текст статьи.
+    Параллельно загружает страницы статей и заменяет snippet реальным текстом.
     """
-    for item in news:
+    def _fetch_one(item):
         url = item.get("url", "")
         if not url:
-            continue
+            return item
         existing = (item.get("snippet") or "").strip()
         fetched = _fetch_url_content(url)
         if fetched and len(fetched) > len(existing):
             item["snippet"] = fetched
             logger.debug("enriched %d chars from %s", len(fetched), url[:60])
-    return news
+        return item
+
+    with ThreadPoolExecutor(max_workers=6) as executor:
+        futures = {executor.submit(_fetch_one, item): i for i, item in enumerate(news)}
+        results = [None] * len(news)
+        for future in as_completed(futures):
+            idx = futures[future]
+            results[idx] = future.result()
+
+    return results
 
 
 def fetch_news_for_ticker(ticker: str, max_items: int = 5,
