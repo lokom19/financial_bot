@@ -295,8 +295,8 @@ def fetch_news_for_ticker(ticker: str, max_items: int = 5,
                           enrich_content: bool = True) -> List[dict]:
     """
     Возвращает [{date, title, url, snippet, source}].
-    Пробует SearXNG первым (русскоязычные запросы, фильтрация мусорных доменов);
-    если пусто — smart-lab. Опционально обогащает snippet текстом статьи.
+    Всегда берёт из обоих источников: SearXNG + smart-lab.
+    Дедуплицирует по URL, обогащает текстом статьи.
     Кеш 30 минут.
     """
     cache_key = (ticker.upper(), max_items)
@@ -308,15 +308,24 @@ def fetch_news_for_ticker(ticker: str, max_items: int = 5,
         if (now - ts).total_seconds() < _CACHE_TTL_SECONDS:
             return items
 
-    news = _fetch_searxng(ticker, max_items)
+    searxng_news = _fetch_searxng(ticker, max_items)
+    smartlab_news = _fetch_smartlab(ticker, max_items=3)
 
-    if not news:
-        logger.info("SearXNG: нет результатов для %s, пробую smart-lab", ticker)
-        news = _fetch_smartlab(ticker, max_items)
+    # объединяем, дедуплицируем по URL
+    seen_urls = set()
+    combined = []
+    for item in searxng_news + smartlab_news:
+        url = item.get("url", "")
+        if url and url not in seen_urls:
+            seen_urls.add(url)
+            combined.append(item)
 
-    if news and enrich_content:
-        news = _enrich_with_content(news)
+    if not combined:
+        logger.warning("Нет новостей для %s ни из одного источника", ticker)
 
-    if news:
-        _CACHE[cache_key] = (now, news)
-    return news
+    if combined and enrich_content:
+        combined = _enrich_with_content(combined)
+
+    if combined:
+        _CACHE[cache_key] = (now, combined)
+    return combined
