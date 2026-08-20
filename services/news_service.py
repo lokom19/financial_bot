@@ -126,12 +126,16 @@ def _fetch_url_content(url: str, max_chars: int = 5000) -> str:
                           "aside", "form", "noscript", "figure"]):
             tag.decompose()
 
-        container = (
-            soup.find("article")
-            or soup.find("main")
-            or soup.find(class_=re.compile(r"article|content|body|text|post", re.I))
-            or soup.body
-        )
+        container = soup.find("article") or soup.find("main")
+        if not container:
+            # берём div с наибольшим количеством текста среди подходящих
+            candidates = soup.find_all(
+                class_=re.compile(r"topic|article|content|body|text|post", re.I)
+            )
+            if candidates:
+                container = max(candidates, key=lambda d: len(d.get_text()))
+        if not container:
+            container = soup.body
         if not container:
             return ""
 
