@@ -321,7 +321,7 @@
         <div class="x-card" style="margin-bottom: 20px;">
             <h3 class="x-card-title" style="display: flex; align-items: center; justify-content: space-between;">
                 <span>📰 Последние новости</span>
-                <span style="font-size: 11px; font-weight: 400; color: var(--text-soft); text-transform: none; letter-spacing: 0;">источник: smart-lab.ru</span>
+                <span id="news-source-label" style="font-size: 11px; font-weight: 400; color: var(--text-soft); text-transform: none; letter-spacing: 0;"></span>
             </h3>
             <div id="news-list">
                 <div style="text-align: center; padding: 30px 0; color: var(--text-muted);">
@@ -977,6 +977,10 @@
                     wrap.innerHTML = '<div style="color: var(--text-muted); padding: 14px 0; font-size: 13px;">Новостей по этому тикеру не найдено</div>';
                     return;
                 }
+                const firstSource = (data.items[0] || {}).source || '';
+                const sourceLabel = firstSource === 'smart-lab' ? 'smart-lab.ru' : firstSource ? 'SearXNG' : '';
+                const labelEl = document.getElementById('news-source-label');
+                if (labelEl) labelEl.textContent = sourceLabel ? `источник: ${sourceLabel}` : '';
                 wrap.innerHTML = data.items.map(n => `
                     <a href="${n.url}" target="_blank" rel="noopener"
                        style="display: block; padding: 12px 0; border-bottom: 1px solid var(--border); color: inherit; text-decoration: none; transition: background 0.12s;"
