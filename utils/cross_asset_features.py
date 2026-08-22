@@ -33,10 +33,12 @@ TICKER_TO_EXTERNAL = {
     "SBER": ["usd_rub", "imoex"],
     "VTBR": ["usd_rub", "imoex"],
     "TCSG": ["usd_rub", "imoex"],
-    # IT / ритейл — только USD/RUB, IMOEX ухудшает
-    # TODO: добавить NASDAQ proxy когда появится fetcher
+    # IT / ритейл
+    # OZON: USD/RUB даёт слабый эффект (-0.4%), но не критично — оставляем
+    # YDEX: любой cross-asset ухудшает (рублёвый доменный бизнес, слабо
+    # завязан на макро). Ждём NASDAQ fetcher.
     "OZON": ["usd_rub"],
-    "YDEX": ["usd_rub"],
+    "YDEX": [],
     # Телеком — умеренная зависимость от MOEX
     "MTSS": ["imoex"],
     "HEAD": ["imoex"],
@@ -102,8 +104,11 @@ def add_cross_asset_features(df: pd.DataFrame, ticker: str,
         return df
 
     external_names = TICKER_TO_EXTERNAL.get(ticker.upper())
-    if not external_names:
+    if external_names is None:
         logger.debug("Cross-asset: нет маппинга для тикера %s", ticker)
+        return df
+    if not external_names:  # пустой список = осознанно без cross-asset
+        logger.debug("Cross-asset: %s — пропуск (пустой маппинг)", ticker)
         return df
 
     result = df.copy()

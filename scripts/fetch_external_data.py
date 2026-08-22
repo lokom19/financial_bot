@@ -153,24 +153,24 @@ def fetch_imoex(engine, start: date, end: date) -> int:
 
 def fetch_brent(engine, start: date, end: date) -> int:
     """
-    Brent через Yahoo Finance (BZ=F — фьючерс на Brent Crude).
-    Yahoo отдаёт CSV/JSON без авторизации через query1.finance.yahoo.com.
+    Brent через Stooq (bezautorизации, CSV) — тикер cb.f (Crude Oil Brent).
+    Fallback на RTSOG (MOEX индекс нефтегаза) если Stooq недоступен.
     """
-    # Также сохраняем старый proxy для backward compat, но приоритет — real Brent
-    _ = _fetch_moex_candles(
+    # RTSOG как всегда доступный fallback / для backward compat
+    rtsog_points = _fetch_moex_candles(
         engine_url="stock", market="index", board="SNDX",
         security="RTSOG", start=start, end=end,
     )
-    if _:
-        upsert_series(engine, "brent_proxy", _)
+    if rtsog_points:
+        upsert_series(engine, "brent_proxy", rtsog_points)
 
-    # Real Brent через Yahoo
-    import time as _time
-    start_ts = int(_time.mktime(start.timetuple()))
-    end_ts = int(_time.mktime(end.timetuple())) + 86400
+    # Real Brent через Stooq
+    # cb.f = Brent Crude Oil futures continuous
     url = (
-        f"https://query1.finance.yahoo.com/v7/finance/download/BZ=F"
-        f"?period1={start_ts}&period2={end_ts}&interval=1d&events=history"
+        f"https://stooq.com/q/d/l/?s=cb.f"
+        f"&d1={start.strftime('%Y%m%d')}"
+        f"&d2={end.strftime('%Y%m%d')}"
+        f"&i=d"
     )
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
@@ -180,25 +180,38 @@ def fetch_brent(engine, start: date, end: date) -> int:
     try:
         resp = requests.get(url, headers=headers, timeout=20)
         if resp.status_code != 200:
-            logger.warning("Yahoo Brent HTTP %d (fallback на proxy)", resp.status_code)
-            return len(_) if _ else 0
-        # CSV: Date,Open,High,Low,Close,Adj Close,Volume
-        for line in resp.text.strip().split("\n")[1:]:
+            logger.warning("Stooq Brent HTTP %d (fallback на proxy)", resp.status_code)
+            return len(rtsog_points)
+        # CSV: Date,Open,High,Low,Close,Volume
+        lines = resp.text.strip().split("\n")
+        if len(lines) < 2:
+            logger.warning("Stooq Brent пустой ответ (fallback на proxy)")
+            return len(rtsog_points)
+        header = lines[0].lower().split(",")
+        if "close" not in header:
+            logger.warning("Stooq Brent неожиданный формат: %s", header)
+            return len(rtsog_points)
+        close_idx = header.index("close")
+        date_idx = header.index("date")
+        for line in lines[1:]:
             parts = line.split(",")
-            if len(parts) < 6:
+            if len(parts) <= max(close_idx, date_idx):
                 continue
             try:
-                d = datetime.fromisoformat(parts[0]).date()
-                close_v = float(parts[4])
+                d = datetime.fromisoformat(parts[date_idx]).date()
+                close_v = float(parts[close_idx])
                 points.append((d, close_v))
             except (ValueError, IndexError):
                 continue
+        if not points:
+            logger.warning("Stooq Brent: не удалось распарсить (fallback на proxy)")
+            return len(rtsog_points)
         n = upsert_series(engine, "brent", points)
-        logger.info("Brent (Yahoo BZ=F): сохранено %d свечей", n)
+        logger.info("Brent (Stooq cb.f): сохранено %d свечей", n)
         return n
     except Exception as e:
-        logger.warning("Yahoo Brent fetch failed: %s (fallback на proxy)", e)
-        return len(_) if _ else 0
+        logger.warning("Stooq Brent fetch failed: %s (fallback на proxy)", e)
+        return len(rtsog_points)
 
 
 def fetch_cbr_rate(engine, start: date, end: date) -> int:
