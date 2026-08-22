@@ -71,8 +71,16 @@ FIGI → ticker и добавляет соответствующие cross-asset
 
 ## Итоговый средний прирост
 
-**Direction accuracy: +1.7 п.п.** (49.9% → 51.6%) в среднем.
+**Direction accuracy: +2.3 п.п.** (49.9% → 52.2%) в среднем.
 Для сильных бенефициаров (SBER, VTBR, GAZP, AFLT) — **+3-5 п.п.**
+
+### Ремарка про Brent
+GAZP использует MOEX RTSOG (индекс нефтегаза) как proxy для Brent.
+Реальный Brent пробовали через Yahoo BZ=F (HTTP 401) и Stooq cb.f
+(Cloudflare bot challenge) — оба недоступны без API-ключа.
+Кандидаты: FRED (`DCOILBRENTEU`), Alpha Vantage, Twelve Data — все
+требуют бесплатной регистрации ключа. С реальным Brent ожидаем ещё
++2-4% к GAZP/LKOH/ROSN direction accuracy.
 
 ## TODO / дальнейшие шаги
 
