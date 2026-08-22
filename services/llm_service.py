@@ -668,49 +668,66 @@ def generate_ticker_report(
     if not models_data:
         models_block = "Нет данных по моделям."
     else:
-        lines = []
-        signals_count = {"BUY": 0, "SELL": 0, "HOLD": 0, "NEUTRAL": 0}
+        # Порог доверия: модель доказала edge если hit30 >= 50% с достаточным n
+        MIN_HIT_RATE = float(os.getenv("MODEL_MIN_HIT_RATE", "50"))
+        MIN_SAMPLES = int(os.getenv("MODEL_MIN_SAMPLES", "5"))
 
-        # Если есть данные по live-точности — также собираем
-        # ВЗВЕШЕННЫЙ консенсус: модели с recent_hit_rate >= 55% имеют вес 2x.
-        weighted_signals = {"BUY": 0.0, "SELL": 0.0, "HOLD": 0.0, "NEUTRAL": 0.0}
-
+        trusted, untrusted = [], []
         for m in models_data:
+            hit30 = m.get("recent_hit_rate_30d")
+            n30 = m.get("recent_samples_30d", 0) or 0
+            if hit30 is not None and n30 >= MIN_SAMPLES and hit30 >= MIN_HIT_RATE:
+                trusted.append(m)
+            else:
+                untrusted.append(m)
+
+        # Фолбэк: если доверенных мало (<3), используем все, но помечаем
+        if len(trusted) >= 3:
+            models_for_consensus = trusted
+            filter_note = (
+                f"Отфильтровано: показаны только {len(trusted)} из {len(models_data)} моделей "
+                f"с доказанной точностью (LIVE hit_rate ≥ {MIN_HIT_RATE:.0f}% на n≥{MIN_SAMPLES}). "
+                f"Отклонены как ненадёжные: {len(untrusted)}."
+            )
+        else:
+            models_for_consensus = models_data
+            filter_note = (
+                f"⚠ Мало доверенных моделей ({len(trusted)}) — использую все {len(models_data)}. "
+                f"Учитывай что LIVE < {MIN_HIT_RATE:.0f}% означает систематические ошибки."
+            )
+
+        signals_count = {"BUY": 0, "SELL": 0, "HOLD": 0, "NEUTRAL": 0}
+        weighted_signals = {"BUY": 0.0, "SELL": 0.0, "HOLD": 0.0, "NEUTRAL": 0.0}
+        lines = []
+
+        for m in models_for_consensus:
             sig = (m.get("signal") or "?").upper()
             signals_count[sig] = signals_count.get(sig, 0) + 1
-            r2 = m.get("r2") or 0
             da = m.get("direction_accuracy") or 0
             hit5 = m.get("recent_hit_rate_5d")
             hit30 = m.get("recent_hit_rate_30d")
-            n5 = m.get("recent_samples_5d", 0)
-            n30 = m.get("recent_samples_30d", 0)
+            n5 = m.get("recent_samples_5d", 0) or 0
+            n30 = m.get("recent_samples_30d", 0) or 0
 
-            # Расчёт веса в консенсусе
-            weight = 1.0
-            if hit30 is not None and hit30 >= 55:
-                weight = 2.0
-            elif hit30 is not None and hit30 < 45:
-                weight = 0.5
+            # Линейный вес: 50%→1.0, 55%→1.5, 60%→2.0, 65%→2.5
+            # Модели ниже 50% (если попали через фолбэк) получают <1.0
+            if hit30 is not None:
+                weight = max(0.1, 1.0 + (hit30 - 50) / 10)
+            else:
+                weight = 1.0
             weighted_signals[sig] = weighted_signals.get(sig, 0.0) + weight
 
-            # Форматируем строку с приоритетом на live-точность.
-            # Всегда показываем реальные цифры (даже при n=1), но помечаем
-            # ненадёжные — иначе LLM пишет "LIVE отсутствует" при n<3,
-            # хотя данные в UI реально есть.
             live_part = ""
             if hit30 is not None and n30 > 0:
-                live_part = f", 🔥 LIVE last30d={hit30:.0f}% (n={n30})"
-                if n30 < 3:
-                    live_part += " ⚠мало"
+                live_part = f", LIVE30d={hit30:.0f}% (n={n30})"
                 if hit5 is not None and n5 >= 1:
-                    live_part += f", last5d={hit5:.0f}% (n={n5})"
+                    live_part += f", 5d={hit5:.0f}%"
             else:
-                live_part = ", LIVE: нет прогнозов"
+                live_part = ", LIVE: нет"
 
-            # Формируем строку: главное — Direction и LIVE, R² показываем мелко
             lines.append(
                 f"  - {m.get('model_name','?')}: {sig}, "
-                f"hist_dir={da:.1f}%{live_part} (R²={r2:.3f} — игнорируй)"
+                f"hist_dir={da:.1f}%{live_part}, weight={weight:.1f}"
             )
 
         total = sum(signals_count.values())
@@ -718,7 +735,6 @@ def generate_ticker_report(
             f"{k}={v}/{total}" for k, v in signals_count.items() if v > 0
         )
 
-        # Взвешенный консенсус (если есть значимые веса)
         wtotal = sum(weighted_signals.values())
         if wtotal > 0:
             weighted_line = ", ".join(
@@ -728,10 +744,21 @@ def generate_ticker_report(
         else:
             weighted_block = ""
 
+        # Список отклонённых для прозрачности
+        excluded_block = ""
+        if untrusted and len(trusted) >= 3:
+            ex_names = ", ".join(
+                f"{m.get('model_name','?')}(hit30={m.get('recent_hit_rate_30d','n/a')})"
+                for m in untrusted[:6]
+            )
+            excluded_block = f"\nИсключены из голосования: {ex_names}"
+
         models_block = (
+            f"{filter_note}\n"
             f"Распределение сигналов (равные веса): {consensus_line}"
             + weighted_block + "\n"
             + "\n".join(lines)
+            + excluded_block
         )
 
     ta_block = "Технических индикаторов нет."
