@@ -776,6 +776,22 @@ def run_nightly_pipeline(skip_training: bool = False, walk_forward: bool = False
             logger.warning("Загрузка свечей не завершилась успехом — продолжаю на старых данных")
         logger.info("Свечи ПОСЛЕ загрузки:")
         report_latest_candle_dates(engine, figi_list)
+
+        # Cross-asset данные: USD/RUB, IMOEX, Brent proxy
+        logger.info("\n[2b] Обновляем внешние ряды (cross-asset)...")
+        try:
+            import subprocess
+            rc = subprocess.run(
+                [sys.executable, str(PROJECT_ROOT / "scripts" / "fetch_external_data.py"),
+                 "--days", "30"],
+                timeout=300,
+            ).returncode
+            if rc == 0:
+                logger.info("Внешние ряды обновлены")
+            else:
+                logger.warning("fetch_external_data.py вернул rc=%d — продолжаю", rc)
+        except Exception as e:
+            logger.warning("Не удалось обновить внешние ряды: %s — продолжаю", e)
     else:
         logger.info("\n[2/4] Загрузка свечей пропущена (--skip-fetch)")
 

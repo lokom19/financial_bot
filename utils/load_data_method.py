@@ -172,17 +172,20 @@ class FearGreedDataEnhancer:
 fear_greed_enhancer = FearGreedDataEnhancer()
 
 
-def load_data(ticker_name: str, add_fear_greed: bool = True, engine=engine) -> pd.DataFrame:
+def load_data(ticker_name: str, add_fear_greed: bool = True,
+              add_cross_asset: bool = True, engine=engine) -> pd.DataFrame:
     """
     Загружает данные тикера и опционально добавляет Fear and Greed Index
+    и cross-asset фичи (USD/RUB, Brent proxy, IMOEX).
 
     Args:
-        ticker_name: Название тикера
+        ticker_name: Название тикера (FIGI-код в схеме all_dfs)
         add_fear_greed: Добавлять ли Fear and Greed Index
+        add_cross_asset: Добавлять ли cross-asset ряды (по маппингу FIGI→ticker)
         engine: SQLAlchemy engine для подключения к БД
 
     Returns:
-        DataFrame с данными тикера и Fear and Greed Index
+        DataFrame с данными тикера + F&G + cross-asset (при доступности)
 
     Raises:
         ValueError: If ticker_name fails validation
@@ -243,6 +246,22 @@ def load_data(ticker_name: str, add_fear_greed: bool = True, engine=engine) -> p
         # Добавляем Fear and Greed Index, если запрошено
         if add_fear_greed and not df.empty:
             df = add_fear_greed_index(df)
+
+        # Добавляем cross-asset фичи (Brent, USD/RUB, IMOEX) — на вход маппинг
+        # идёт по TICKER (SBER, GAZP), а не по FIGI. Резолвим FIGI→ticker.
+        if add_cross_asset and not df.empty:
+            try:
+                from utils.cross_asset_features import (
+                    add_cross_asset_features, resolve_ticker_from_figi
+                )
+                ticker_code = resolve_ticker_from_figi(engine, ticker_name)
+                if ticker_code:
+                    df = add_cross_asset_features(df, ticker_code, engine)
+                else:
+                    logging.debug("Cross-asset: FIGI %s не найден в public.tickers",
+                                  ticker_name)
+            except Exception as ce:
+                logging.warning(f"Cross-asset features error for {ticker_name}: {ce}")
 
         return df
 
