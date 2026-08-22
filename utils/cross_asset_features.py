@@ -18,23 +18,30 @@ from sqlalchemy import text
 
 logger = logging.getLogger(__name__)
 
-# Какие внешние ряды добавляем к каждому тикеру
+# Какие внешние ряды добавляем к каждому тикеру.
+# Мэппинг подтверждён A/B тестом на catboost:
+# ✓ SBER/VTBR (+3-4% dir): usd_rub — валютные позиции банков
+# ✓ AFLT (+4.5% dir): usd_rub+brent_proxy — топливные costs
+# × YDEX/OZON: IMOEX вредит (-1..-5% dir), нужен NASDAQ вместо
+# ~ GAZP: brent_proxy слабо помогает (+0.5%), нужен настоящий Brent
 TICKER_TO_EXTERNAL = {
-    # Нефтегаз — нужен Brent
-    "GAZP": ["brent_proxy", "usd_rub", "imoex"],
-    "LKOH": ["brent_proxy", "usd_rub", "imoex"],
-    "ROSN": ["brent_proxy", "usd_rub", "imoex"],
-    # Банки — USD/RUB + индекс
+    # Нефтегаз — Brent proxy (пока) + валюта. IMOEX убрали (циркулярность).
+    "GAZP": ["brent", "usd_rub"],
+    "LKOH": ["brent", "usd_rub"],
+    "ROSN": ["brent", "usd_rub"],
+    # Банки — USD/RUB + IMOEX (положительный эффект подтверждён)
     "SBER": ["usd_rub", "imoex"],
     "VTBR": ["usd_rub", "imoex"],
     "TCSG": ["usd_rub", "imoex"],
-    # IT / ритейл
-    "OZON": ["usd_rub", "imoex"],
-    "YDEX": ["usd_rub", "imoex"],
+    # IT / ритейл — только USD/RUB, IMOEX ухудшает
+    # TODO: добавить NASDAQ proxy когда появится fetcher
+    "OZON": ["usd_rub"],
+    "YDEX": ["usd_rub"],
+    # Телеком — умеренная зависимость от MOEX
     "MTSS": ["imoex"],
     "HEAD": ["imoex"],
-    # Транспорт — валюта + топливо
-    "AFLT": ["brent_proxy", "usd_rub", "imoex"],
+    # Транспорт — валюта + топливо (Brent), эффект +4.5%
+    "AFLT": ["brent", "usd_rub"],
 }
 
 

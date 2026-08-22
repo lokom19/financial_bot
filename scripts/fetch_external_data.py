@@ -153,21 +153,52 @@ def fetch_imoex(engine, start: date, end: date) -> int:
 
 def fetch_brent(engine, start: date, end: date) -> int:
     """
-    Brent — используем ближайший активный фьючерс на MOEX (BR).
-    MOEX торгует Brent фьючерсами (тикер BR-<месяц>.<год>), но склеенного
-    непрерывного ряда нет — берём front-month через BR-<текущий месяц>.
-    Альтернатива: EUR/USD или Yahoo BZ=F, но MOEX самый надёжный доступ.
+    Brent через Yahoo Finance (BZ=F — фьючерс на Brent Crude).
+    Yahoo отдаёт CSV/JSON без авторизации через query1.finance.yahoo.com.
     """
-    # Попытка через MOEX FORTS
-    # Для simplicity — берём индекс RTSOG (нефть/газ индекс) как прокси
-    # Он высоко коррелирует с Brent и всегда доступен через MOEX.
-    points = _fetch_moex_candles(
+    # Также сохраняем старый proxy для backward compat, но приоритет — real Brent
+    _ = _fetch_moex_candles(
         engine_url="stock", market="index", board="SNDX",
         security="RTSOG", start=start, end=end,
     )
-    n = upsert_series(engine, "brent_proxy", points)
-    logger.info("Brent (proxy RTSOG): сохранено %d свечей", n)
-    return n
+    if _:
+        upsert_series(engine, "brent_proxy", _)
+
+    # Real Brent через Yahoo
+    import time as _time
+    start_ts = int(_time.mktime(start.timetuple()))
+    end_ts = int(_time.mktime(end.timetuple())) + 86400
+    url = (
+        f"https://query1.finance.yahoo.com/v7/finance/download/BZ=F"
+        f"?period1={start_ts}&period2={end_ts}&interval=1d&events=history"
+    )
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                      "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124 Safari/537.36",
+    }
+    points = []
+    try:
+        resp = requests.get(url, headers=headers, timeout=20)
+        if resp.status_code != 200:
+            logger.warning("Yahoo Brent HTTP %d (fallback на proxy)", resp.status_code)
+            return len(_) if _ else 0
+        # CSV: Date,Open,High,Low,Close,Adj Close,Volume
+        for line in resp.text.strip().split("\n")[1:]:
+            parts = line.split(",")
+            if len(parts) < 6:
+                continue
+            try:
+                d = datetime.fromisoformat(parts[0]).date()
+                close_v = float(parts[4])
+                points.append((d, close_v))
+            except (ValueError, IndexError):
+                continue
+        n = upsert_series(engine, "brent", points)
+        logger.info("Brent (Yahoo BZ=F): сохранено %d свечей", n)
+        return n
+    except Exception as e:
+        logger.warning("Yahoo Brent fetch failed: %s (fallback на proxy)", e)
+        return len(_) if _ else 0
 
 
 def fetch_cbr_rate(engine, start: date, end: date) -> int:
