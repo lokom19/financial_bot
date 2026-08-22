@@ -171,6 +171,53 @@
         .exit-signal_flip { background: #dbeafe; color: #1e40af; }
         .exit-time_limit { background: #e5e7eb; color: #374151; }
         .exit-unresolved { background: #fce7f3; color: #831843; }
+
+        .ticker-filter {
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: 14px;
+            padding: 16px 22px;
+            margin-bottom: 22px;
+        }
+        .ticker-filter h4 {
+            margin: 0 0 12px;
+            font-size: 11px;
+            color: var(--text-muted);
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            font-weight: 700;
+        }
+        .ticker-chips {
+            display: flex;
+            gap: 8px;
+            flex-wrap: wrap;
+        }
+        .ticker-chip-btn {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            padding: 6px 12px;
+            border: 1.5px solid var(--border);
+            border-radius: 999px;
+            background: var(--surface);
+            color: var(--text-muted);
+            font-weight: 700;
+            font-size: 13px;
+            cursor: pointer;
+            transition: all 0.15s;
+            user-select: none;
+        }
+        .ticker-chip-btn:hover {
+            border-color: var(--primary);
+        }
+        .ticker-chip-btn.active {
+            background: var(--primary);
+            border-color: var(--primary);
+            color: #fff;
+        }
+        .ticker-chip-btn.active:hover {
+            background: var(--primary-hover);
+        }
     </style>
 </head>
 <body>
@@ -234,13 +281,21 @@
             </label>
             <label title="Множитель ATR14 для initial stop-loss">
                 Initial stop × ATR
-                <input type="number" id="atr-stop" value="1.0" min="0.3" max="3.0" step="0.1">
+                <input type="number" id="atr-stop" value="1.5" min="0.3" max="3.0" step="0.1">
             </label>
             <label title="Множитель ATR14 для trailing stop">
                 Trail stop × ATR
-                <input type="number" id="atr-trail" value="1.0" min="0.3" max="3.0" step="0.1">
+                <input type="number" id="atr-trail" value="2.0" min="0.3" max="3.0" step="0.1">
             </label>
             <button id="simulate-btn" onclick="runSimulation()">Пересчитать</button>
+        </div>
+
+        <div class="ticker-filter" id="ticker-filter-block" style="display:none;">
+            <h4>🎯 Тикеры для торговли (нажми чтобы вкл/выкл)</h4>
+            <div class="ticker-chips" id="ticker-chips"></div>
+            <div style="font-size: 11px; color: var(--text-muted); margin-top: 10px;">
+                SBER и GAZP исключены по умолчанию — исторически убыточны в нашем сигнале.
+            </div>
         </div>
 
         <div id="summary-wrap"></div>
@@ -272,22 +327,34 @@
         return sign + v.toFixed(2) + '%';
     };
 
+    // Состояние тикеров: {ticker: true/false}
+    // true = включён (торгуем), false = исключён
+    let tickerState = {};
+    // Инициализировано ли (получили ли список тикеров с бэка)
+    let tickersInitialized = false;
+
     async function runSimulation() {
         const btn = document.getElementById('simulate-btn');
         btn.disabled = true;
         btn.textContent = '...';
+
+        const excluded = Object.entries(tickerState)
+            .filter(([t, on]) => !on)
+            .map(([t]) => t);
 
         const params = new URLSearchParams({
             initial: parseFloat(document.getElementById('initial').value) || 100000,
             commission: parseFloat(document.getElementById('commission').value) || 0,
             min_confidence: document.getElementById('min-confidence').value,
             max_hold_days: parseInt(document.getElementById('max-hold').value) || 5,
-            atr_mult_stop: parseFloat(document.getElementById('atr-stop').value) || 1.0,
-            atr_mult_trail: parseFloat(document.getElementById('atr-trail').value) || 1.0,
+            atr_mult_stop: parseFloat(document.getElementById('atr-stop').value) || 1.5,
+            atr_mult_trail: parseFloat(document.getElementById('atr-trail').value) || 2.0,
+            exclude_tickers: excluded.join(','),
         });
         try {
             const resp = await fetch(`/api/portfolio/pro?${params.toString()}`);
             const data = await resp.json();
+            renderTickerFilter(data.available_tickers || [], data.excluded_tickers || []);
             renderSummary(data.summary);
             renderEquity(data.equity_curve, data.summary);
             renderByTicker(data.by_ticker);
@@ -298,6 +365,38 @@
             btn.disabled = false;
             btn.textContent = 'Пересчитать';
         }
+    }
+
+    function renderTickerFilter(available, excluded) {
+        if (!available || available.length === 0) return;
+
+        // При первой инициализации: используем excluded с бэка (SBER,GAZP по умолчанию)
+        if (!tickersInitialized) {
+            const excludedSet = new Set(excluded);
+            for (const t of available) {
+                tickerState[t] = !excludedSet.has(t);
+            }
+            tickersInitialized = true;
+        } else {
+            // При обновлении добавляем новые тикеры как включённые
+            for (const t of available) {
+                if (!(t in tickerState)) tickerState[t] = true;
+            }
+        }
+
+        const block = document.getElementById('ticker-filter-block');
+        const chips = document.getElementById('ticker-chips');
+        block.style.display = 'block';
+        chips.innerHTML = available.map(t =>
+            `<span class="ticker-chip-btn ${tickerState[t] ? 'active' : ''}"
+                   data-ticker="${t}"
+                   onclick="toggleTicker('${t}')">${t}</span>`
+        ).join('');
+    }
+
+    function toggleTicker(ticker) {
+        tickerState[ticker] = !tickerState[ticker];
+        runSimulation();
     }
 
     function renderSummary(s) {
@@ -438,15 +537,21 @@
             wrap.innerHTML = '';
             return;
         }
-        let html = '<div class="trades-card"><h3>📊 По тикерам</h3><table class="x-table"><thead><tr>'
+        // Сортируем по PnL (лучшие сверху)
+        const sorted = Object.entries(byTicker).sort((a, b) => b[1].pnl_rub - a[1].pnl_rub);
+
+        let html = '<div class="trades-card"><h3>📊 По тикерам (отсортированы по P&L)</h3><table class="x-table"><thead><tr>'
             + '<th>Тикер</th><th class="right">Сделок</th><th class="right">Win Rate</th>'
             + '<th class="right">Направление</th>'
             + '<th class="right">Ср. срок</th>'
-            + '<th class="right">Средняя доходность</th><th class="right">P&L, ₽</th></tr></thead><tbody>';
-        for (const [ticker, st] of Object.entries(byTicker)) {
+            + '<th class="right">Средняя доходность</th><th class="right">P&L, ₽</th>'
+            + '<th style="text-align:center;" title="Кандидат на исключение если убыточный">🎯</th></tr></thead><tbody>';
+        for (const [ticker, st] of sorted) {
             const wrCls = st.win_rate_pct >= 55 ? 'text-success' : (st.win_rate_pct <= 45 ? 'text-danger' : '');
             const dirCls = st.direction_accuracy_pct === null ? '' : (st.direction_accuracy_pct >= 55 ? 'text-success' : (st.direction_accuracy_pct <= 45 ? 'text-danger' : ''));
             const pnlCls = st.pnl_rub > 0 ? 'text-success' : (st.pnl_rub < 0 ? 'text-danger' : '');
+            const badge = st.pnl_rub < 0 ? '<span title="Убыточен — рассмотри исключение" style="color:#dc2626;font-size:11px;">⚠ убыточен</span>' :
+                          st.pnl_rub > 0 ? '<span style="color:#10b981;font-size:11px;">✓</span>' : '';
             html += `<tr>
                 <td><b>${ticker}</b></td>
                 <td class="right">${st.trades}</td>
@@ -455,6 +560,7 @@
                 <td class="right text-mute">${st.avg_holding_days ?? '—'} дн.</td>
                 <td class="right ${st.avg_return_pct >= 0 ? 'text-success' : 'text-danger'}">${fmtPct(st.avg_return_pct)}</td>
                 <td class="right ${pnlCls}">${fmtRub(st.pnl_rub)}</td>
+                <td style="text-align:center;">${badge}</td>
             </tr>`;
         }
         html += '</tbody></table></div>';

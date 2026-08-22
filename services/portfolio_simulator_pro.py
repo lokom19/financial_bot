@@ -18,6 +18,7 @@ PRO-симулятор портфеля: стратегия Position Continuatio
 import logging
 from collections import defaultdict
 from datetime import date as _date, timedelta as _td
+from typing import Optional
 
 import numpy as np
 import pandas as pd
@@ -82,8 +83,9 @@ def simulate_pro(engine, initial_capital: float = 100_000.0,
                  commission_pct: float = DEFAULT_COMMISSION_PCT,
                  min_confidence: str = "средняя",
                  max_hold_days: int = 5,
-                 atr_mult_stop: float = 1.0,
-                 atr_mult_trail: float = 1.0) -> dict:
+                 atr_mult_stop: float = 1.5,
+                 atr_mult_trail: float = 2.0,
+                 exclude_tickers: Optional[set] = None) -> dict:
     """
     Симуляция PRO-стратегии по всем ticker_reports.
 
@@ -92,9 +94,13 @@ def simulate_pro(engine, initial_capital: float = 100_000.0,
         commission_pct: комиссия в одну сторону (%)
         min_confidence: минимум "низкая" / "средняя" / "высокая"
         max_hold_days: максимум дней держания позиции
-        atr_mult_stop: множитель ATR для initial stop
-        atr_mult_trail: множитель ATR для trailing stop
+        atr_mult_stop: множитель ATR для initial stop (default 1.5)
+        atr_mult_trail: множитель ATR для trailing stop (default 2.0)
+        exclude_tickers: множество тикеров для исключения из торговли
     """
+    exclude_tickers = exclude_tickers or set()
+    exclude_tickers = {t.upper() for t in exclude_tickers}
+
     # 1. Все вердикты по хронологии
     with engine.connect() as conn:
         rows = conn.execute(text("""
@@ -110,8 +116,18 @@ def simulate_pro(engine, initial_capital: float = 100_000.0,
             ORDER BY prediction_date ASC, ticker ASC
         """)).fetchall()
 
+    # Список всех известных тикеров (для UI — до фильтрации)
+    all_tickers = sorted({r[1] for r in rows}) if rows else []
+
+    # Применяем фильтр по тикерам
+    if exclude_tickers:
+        rows = [r for r in rows if r[1].upper() not in exclude_tickers]
+
     if not rows:
-        return _empty_result(initial_capital, commission_pct, min_confidence)
+        empty = _empty_result(initial_capital, commission_pct, min_confidence)
+        empty["available_tickers"] = all_tickers
+        empty["excluded_tickers"] = sorted(exclude_tickers)
+        return empty
 
     min_level = CONFIDENCE_LEVEL.get(min_confidence, 0)
 
@@ -410,6 +426,8 @@ def simulate_pro(engine, initial_capital: float = 100_000.0,
         "equity_curve": equity_curve,
         "trades": trades,
         "by_ticker": by_ticker,
+        "available_tickers": all_tickers,
+        "excluded_tickers": sorted(exclude_tickers),
     }
 
 
