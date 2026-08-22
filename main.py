@@ -459,11 +459,14 @@ async def portfolio_simulation_pro(request: Request,
                                     atr_mult_stop: float = 2.0,
                                     atr_mult_trail: float = 1.5,
                                     atr_trail_activation: float = 1.0,
-                                    exclude_tickers: str = "SBER,GAZP"):
+                                    exclude_tickers: str = "SBER,GAZP",
+                                    min_volume_ratio: float = 0.0,
+                                    kelly_sizing: bool = False):
     """
-    PRO симуляция: breakeven-lock trailing stop strategy.
-    Initial stop защищает от катастрофы; trailing активируется только
-    когда позиция ушла в прибыль >= atr_trail_activation × ATR.
+    PRO симуляция: breakeven-lock trailing stop + volume filter + Kelly sizing.
+    - min_volume_ratio > 0: пропускать сделки при объёме < N × avg_20d volume
+    - kelly_sizing=true: распределять капитал пропорционально confidence
+      (высокая ×1.5, средняя ×1.0, низкая ×0.5)
     """
     exclude_set = {t.strip().upper() for t in exclude_tickers.split(",") if t.strip()}
     result = await asyncio.to_thread(
@@ -477,6 +480,8 @@ async def portfolio_simulation_pro(request: Request,
         atr_mult_trail=atr_mult_trail,
         atr_trail_activation=atr_trail_activation,
         exclude_tickers=exclude_set,
+        min_volume_ratio=min_volume_ratio,
+        kelly_sizing=kelly_sizing,
     )
     return result
 

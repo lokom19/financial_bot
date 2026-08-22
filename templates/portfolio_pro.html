@@ -70,6 +70,12 @@
             border-radius: 10px;
         }
         .controls input:focus, .controls select:focus { outline: none; border-color: var(--primary); }
+        .controls .ck-line {
+            display: flex; align-items: center; gap: 6px;
+            font-size: 13px; color: var(--text); text-transform: none;
+            letter-spacing: 0; font-weight: 500;
+            padding-bottom: 10px;
+        }
         .controls button {
             padding: 11px 22px;
             background: var(--primary);
@@ -292,6 +298,14 @@
                 Trail активация × ATR
                 <input type="number" id="atr-activation" value="1.0" min="0.0" max="3.0" step="0.1">
             </label>
+            <label title="Мин. объём торгов относительно среднего за 20 дней. 0 = без фильтра. 1.0 = только выше среднего.">
+                Min volume ratio
+                <input type="number" id="min-vol" value="0.0" min="0.0" max="3.0" step="0.1">
+            </label>
+            <label class="ck-line" title="Взвешивать капитал по уверенности LLM (низкая ×0.5, средняя ×1.0, высокая ×1.5)">
+                <input type="checkbox" id="kelly-sizing">
+                Kelly sizing
+            </label>
             <button id="simulate-btn" onclick="runSimulation()">Пересчитать</button>
         </div>
 
@@ -355,6 +369,8 @@
             atr_mult_stop: parseFloat(document.getElementById('atr-stop').value) || 2.0,
             atr_mult_trail: parseFloat(document.getElementById('atr-trail').value) || 1.5,
             atr_trail_activation: parseFloat(document.getElementById('atr-activation').value) || 0,
+            min_volume_ratio: parseFloat(document.getElementById('min-vol').value) || 0,
+            kelly_sizing: document.getElementById('kelly-sizing').checked,
             exclude_tickers: excluded.join(','),
         });
         try {

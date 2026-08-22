@@ -61,9 +61,9 @@ def _compute_atr(engine, figi: str, period: int = 14, lookback_days: int = 60) -
 
 
 def _fetch_ohlc_range(engine, figi: str, start: _date, end: _date) -> dict:
-    """{date: (open, high, low, close)} — свечи для симуляции."""
+    """{date: (open, high, low, close, volume)} — свечи для симуляции."""
     q = text(
-        f'SELECT timestamp::date AS d, open, high, low, close '
+        f'SELECT timestamp::date AS d, open, high, low, close, volume '
         f'FROM all_dfs."{figi}" '
         f'WHERE timestamp::date BETWEEN :s AND :e '
         f'ORDER BY timestamp'
@@ -75,8 +75,32 @@ def _fetch_ohlc_range(engine, figi: str, start: _date, end: _date) -> dict:
         logger.warning("OHLC fetch failed for %s: %s", figi, e)
         return {}
     return {row.d: (float(row.open), float(row.high),
-                    float(row.low), float(row.close))
+                    float(row.low), float(row.close),
+                    float(row.volume) if row.volume is not None else 0.0)
             for row in df.itertuples()}
+
+
+def _compute_volume_ma(ohlc_dict: dict, window: int = 20) -> dict:
+    """{date: avg_volume_prev_N_days} — скользящий средний объём."""
+    if not ohlc_dict:
+        return {}
+    dates = sorted(ohlc_dict.keys())
+    volumes = [ohlc_dict[d][4] for d in dates]  # index 4 = volume
+    result = {}
+    for i, d in enumerate(dates):
+        if i < window:
+            result[d] = None
+            continue
+        window_vols = volumes[i - window:i]
+        result[d] = sum(window_vols) / len(window_vols) if window_vols else None
+    return result
+
+
+CONFIDENCE_MULTIPLIER = {
+    "низкая": 0.5,
+    "средняя": 1.0,
+    "высокая": 1.5,
+}
 
 
 def simulate_pro(engine, initial_capital: float = 100_000.0,
@@ -86,7 +110,9 @@ def simulate_pro(engine, initial_capital: float = 100_000.0,
                  atr_mult_stop: float = 2.0,
                  atr_mult_trail: float = 1.5,
                  atr_trail_activation: float = 1.0,
-                 exclude_tickers: Optional[set] = None) -> dict:
+                 exclude_tickers: Optional[set] = None,
+                 min_volume_ratio: float = 0.0,
+                 kelly_sizing: bool = False) -> dict:
     """
     Симуляция PRO-стратегии с breakeven-lock trailing stop.
 
@@ -141,12 +167,15 @@ def simulate_pro(engine, initial_capital: float = 100_000.0,
     date_from = all_dates[0]
     date_to = all_dates[-1] + _td(days=max_hold_days + 5)
 
-    # Загружаем OHLC + ATR для каждого тикера
-    ohlc = {t: _fetch_ohlc_range(engine, f, date_from, date_to)
+    # Загружаем OHLC + ATR + средний volume для каждого тикера
+    # Расширяем окно назад на 30 дней чтобы посчитать volume MA(20) на первую дату
+    ohlc_fetch_from = date_from - _td(days=30)
+    ohlc = {t: _fetch_ohlc_range(engine, f, ohlc_fetch_from, date_to)
             for t, f in figi_by_ticker.items()}
     atr_map = {t: _compute_atr(engine, f, period=14,
                                 lookback_days=(date_to - date_from).days + 30)
                for t, f in figi_by_ticker.items()}
+    volume_ma = {t: _compute_volume_ma(ohlc[t], window=20) for t in ohlc}
 
     # 3. Верdicts by (date, ticker)
     verdicts = {}
@@ -188,7 +217,7 @@ def simulate_pro(engine, initial_capital: float = 100_000.0,
             candle = ohlc[ticker].get(day)
             if not candle:
                 continue
-            _, high, low, close = candle
+            _, high, low, close, _vol = candle
             atr = atr_map[ticker].get(day) or atr_map[ticker].get(
                 max((d for d in atr_map[ticker] if d < day), default=None)
             )
@@ -303,23 +332,37 @@ def simulate_pro(engine, initial_capital: float = 100_000.0,
             if not entry_p or entry_p <= 0:
                 continue
             # fill-check по high/low
-            _, high, low, close = candle
+            _, high, low, close, day_vol = candle
             filled = (v["verdict"] == "BUY" and low <= entry_p) or \
                      (v["verdict"] == "SELL" and high >= entry_p)
             if not filled:
                 continue
+            # Volume filter: только если объём >= min_ratio × avg_20d
+            if min_volume_ratio > 0:
+                avg_vol = volume_ma[ticker].get(day)
+                if avg_vol and avg_vol > 0:
+                    vol_ratio = day_vol / avg_vol
+                    if vol_ratio < min_volume_ratio:
+                        continue
             new_entries.append((ticker, v, entry_p, candle))
 
         if new_entries:
-            # равномерное распределение свободного капитала
-            free_slots = len(new_entries)
-            # доступный капитал = equity минус то что уже в открытых позициях
+            # Kelly-lite sizing: чем выше confidence, тем больше доля.
+            # низкая=0.5, средняя=1.0, высокая=1.5
             capital_in_positions = sum(p["capital"] for p in open_positions.values())
             free_capital = max(0.0, equity - capital_in_positions)
-            per_slot = free_capital / free_slots if free_slots else 0
 
-            for ticker, v, entry_p, candle in new_entries:
-                if per_slot <= 0:
+            if kelly_sizing:
+                weights = [CONFIDENCE_MULTIPLIER.get(v["confidence"], 1.0)
+                           for _, v, _, _ in new_entries]
+                total_w = sum(weights) or 1
+                allocations = [free_capital * w / total_w for w in weights]
+            else:
+                per_slot = free_capital / len(new_entries) if new_entries else 0
+                allocations = [per_slot] * len(new_entries)
+
+            for (ticker, v, entry_p, candle), alloc in zip(new_entries, allocations):
+                if alloc <= 0:
                     continue
                 atr = atr_map[ticker].get(day) or atr_map[ticker].get(
                     max((d for d in atr_map[ticker] if d < day), default=None)
@@ -340,7 +383,7 @@ def simulate_pro(engine, initial_capital: float = 100_000.0,
                     "confidence": v["confidence"],
                     "stop": initial_stop,
                     "extreme": extreme,
-                    "capital": per_slot,
+                    "capital": alloc,
                     "opened_date": day,
                     "days_held": 0,
                     "trailing_active": False,
@@ -359,7 +402,7 @@ def simulate_pro(engine, initial_capital: float = 100_000.0,
             candle = ohlc[ticker].get(last_day)
             if not candle:
                 continue
-            _, _, _, close = candle
+            _, _, _, close, _vol = candle
             if pos["direction"] == "BUY":
                 gross_pct = (close - pos["entry"]) / pos["entry"] * 100
             else:
@@ -412,6 +455,8 @@ def simulate_pro(engine, initial_capital: float = 100_000.0,
         "max_hold_days": max_hold_days,
         "atr_mult_stop": atr_mult_stop,
         "atr_mult_trail": atr_mult_trail,
+        "min_volume_ratio": min_volume_ratio,
+        "kelly_sizing": kelly_sizing,
         "avg_holding_days": round(avg_hold, 1) if avg_hold else None,
         "days_simulated": len(equity_curve),
         "exits": {
