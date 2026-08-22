@@ -3,13 +3,36 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Калькулятор портфеля — Trading Signals</title>
+    <title>Портфель PRO — Trading Signals</title>
     <link rel="stylesheet" href="/static/styles.css?v=4">
     <style>
-        .page { max-width: 1180px; margin: 28px auto; padding: 0 24px; }
-        .hdr { display: flex; align-items: baseline; gap: 16px; margin-bottom: 24px; flex-wrap: wrap; }
+        .page { max-width: 1220px; margin: 28px auto; padding: 0 24px; }
+        .hdr { display: flex; align-items: baseline; gap: 16px; margin-bottom: 8px; flex-wrap: wrap; }
         .hdr h1 { margin: 0; font-size: 32px; color: var(--text); letter-spacing: -0.025em; }
+        .hdr .pro-badge {
+            background: linear-gradient(135deg, #f59e0b, #d97706);
+            color: #fff;
+            padding: 3px 10px;
+            border-radius: 999px;
+            font-size: 11px;
+            font-weight: 800;
+            letter-spacing: 0.05em;
+            text-transform: uppercase;
+        }
         .hdr .sub { color: var(--text-soft); font-size: 14px; }
+
+        .strategy-desc {
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-left: 3px solid #f59e0b;
+            border-radius: 10px;
+            padding: 14px 18px;
+            margin-bottom: 22px;
+            font-size: 13px;
+            color: var(--text-soft);
+            line-height: 1.5;
+        }
+        .strategy-desc b { color: var(--text); }
 
         .controls {
             background: var(--surface);
@@ -37,15 +60,16 @@
             font-weight: 600;
             border: 1.5px solid var(--border);
             border-radius: 10px;
-            width: 160px;
+            width: 140px;
             font-variant-numeric: tabular-nums;
         }
-        .controls input:focus { outline: none; border-color: var(--primary); }
-        .controls .ck-line {
-            display: flex; align-items: center; gap: 6px;
-            font-size: 13px; color: var(--text); text-transform: none;
-            letter-spacing: 0; font-weight: 500;
+        .controls select {
+            padding: 10px 12px;
+            font-size: 14px;
+            border: 1.5px solid var(--border);
+            border-radius: 10px;
         }
+        .controls input:focus, .controls select:focus { outline: none; border-color: var(--primary); }
         .controls button {
             padding: 11px 22px;
             background: var(--primary);
@@ -143,18 +167,21 @@
             color: var(--text-muted);
             background: var(--surface-alt);
         }
+        .exit-trailing { background: #fef3c7; color: #92400e; }
+        .exit-signal_flip { background: #dbeafe; color: #1e40af; }
+        .exit-time_limit { background: #e5e7eb; color: #374151; }
+        .exit-unresolved { background: #fce7f3; color: #831843; }
     </style>
 </head>
 <body>
-    <!-- Top bar -->
     <div class="tb-top">
         <div class="tb-brand">
             <a href="/">📈 Trading Signals</a>
             <span class="slash">/</span>
-            <span class="ticker-chip">Калькулятор портфеля</span>
+            <span class="ticker-chip">Портфель PRO</span>
         </div>
         <div class="tb-user">
-            <a href="/portfolio/pro" style="color: #d97706; font-weight: 600;">🚀 PRO</a>
+            <a href="/portfolio" style="color: var(--text-soft);">💰 Обычный портфель</a>
             <a href="{{ streamlit_url }}" target="_blank" rel="noopener">📊 Дашборд</a>
             {% if current_user %}
             <div class="user-chip">
@@ -170,8 +197,18 @@
 
     <div class="page">
         <div class="hdr">
-            <h1>💰 Калькулятор портфеля</h1>
-            <span class="sub">Что было бы с деньгами, если бы следовать AI-вердиктам</span>
+            <h1>🚀 Портфель</h1>
+            <span class="pro-badge">PRO</span>
+            <span class="sub">Continuation strategy + ATR trailing stop</span>
+        </div>
+
+        <div class="strategy-desc">
+            <b>Стратегия:</b> позиция открывается при вердикте BUY/SELL с фильтром по уверенности.
+            Стоп-лосс адаптивный — <b>1×ATR14</b> от цены входа.
+            Каждый день <b>trailing stop</b> подтягивается к текущему экстремуму цены (только вверх для BUY, только вниз для SELL).
+            Позиция закрывается по: <b>trailing stop</b> (цена откатилась), <b>signal flip</b>
+            (вердикт сменился на противоположный), или <b>time limit</b> (превышен лимит дней).
+            Держим тренды дольше — не выходим каждый день по close.
         </div>
 
         <div class="controls">
@@ -180,35 +217,38 @@
                 <input type="number" id="initial" value="100000" min="1000" step="10000">
             </label>
             <label>
-                Комиссия за сделку, %
+                Комиссия, %
                 <input type="number" id="commission" value="0.05" min="0" step="0.01">
-            </label>
-            <label class="ck-line">
-                <input type="checkbox" id="only-closed" checked>
-                Только закрытые сделки
             </label>
             <label>
                 Уверенность
-                <select id="min-confidence" style="padding: 10px 12px; font-size: 14px; border: 1.5px solid var(--border); border-radius: 10px;">
-                    <option value="all">Все сигналы</option>
-                    <option value="средняя">≥ средняя</option>
+                <select id="min-confidence">
+                    <option value="низкая">≥ низкая</option>
+                    <option value="средняя" selected>≥ средняя</option>
                     <option value="высокая">только высокая</option>
                 </select>
             </label>
-            <label class="ck-line" title="В сделки с высокой уверенностью вкладываем больше капитала (веса 3/2/1)">
-                <input type="checkbox" id="weighted-by-conf">
-                Взвешивать капитал по уверенности
+            <label>
+                Макс. дней держания
+                <input type="number" id="max-hold" value="5" min="1" max="30" step="1">
+            </label>
+            <label title="Множитель ATR14 для initial stop-loss">
+                Initial stop × ATR
+                <input type="number" id="atr-stop" value="1.0" min="0.3" max="3.0" step="0.1">
+            </label>
+            <label title="Множитель ATR14 для trailing stop">
+                Trail stop × ATR
+                <input type="number" id="atr-trail" value="1.0" min="0.3" max="3.0" step="0.1">
             </label>
             <button id="simulate-btn" onclick="runSimulation()">Пересчитать</button>
         </div>
 
         <div id="summary-wrap"></div>
         <div class="equity-chart">
-            <h3>📈 Кривая капитала</h3>
+            <h3>📈 Кривая капитала (PRO)</h3>
             <canvas id="equity-canvas"></canvas>
             <div id="empty-state" style="display:none; text-align:center; padding: 40px 0; color: var(--text-muted);">
-                Нет закрытых сделок. Симулятор покажет результаты после того как
-                накопится несколько прогнозов с известным фактом.
+                Нет закрытых сделок. Стратегия PRO ждёт совпадение свежего вердикта с фильтром уверенности.
             </div>
         </div>
         <div id="by-ticker-wrap"></div>
@@ -237,13 +277,16 @@
         btn.disabled = true;
         btn.textContent = '...';
 
-        const initial = parseFloat(document.getElementById('initial').value) || 100000;
-        const commission = parseFloat(document.getElementById('commission').value) || 0;
-        const onlyClosed = document.getElementById('only-closed').checked;
-        const minConfidence = document.getElementById('min-confidence').value;
-        const weighted = document.getElementById('weighted-by-conf').checked;
+        const params = new URLSearchParams({
+            initial: parseFloat(document.getElementById('initial').value) || 100000,
+            commission: parseFloat(document.getElementById('commission').value) || 0,
+            min_confidence: document.getElementById('min-confidence').value,
+            max_hold_days: parseInt(document.getElementById('max-hold').value) || 5,
+            atr_mult_stop: parseFloat(document.getElementById('atr-stop').value) || 1.0,
+            atr_mult_trail: parseFloat(document.getElementById('atr-trail').value) || 1.0,
+        });
         try {
-            const resp = await fetch(`/api/portfolio?initial=${initial}&commission=${commission}&only_closed=${onlyClosed}&min_confidence=${encodeURIComponent(minConfidence)}&weighted_by_confidence=${weighted}`);
+            const resp = await fetch(`/api/portfolio/pro?${params.toString()}`);
             const data = await resp.json();
             renderSummary(data.summary);
             renderEquity(data.equity_curve, data.summary);
@@ -284,35 +327,37 @@
                 <span class="sub">за ${s.days_simulated} торг. дней</span>
             </div>
             <div class="summ-item">
+                <span class="lbl">Средний срок держания</span>
+                <span class="val amber">${s.avg_holding_days ?? '—'} дн.</span>
+                <span class="sub">лимит: ${s.max_hold_days ?? '—'}</span>
+            </div>
+            <div class="summ-item">
                 <span class="lbl">Win Rate</span>
                 <span class="val ${wrClass}">${s.win_rate_pct === null ? '—' : s.win_rate_pct + '%'}</span>
                 <span class="sub">прибыльных: ${s.winning_trades}/${s.trades}</span>
             </div>
-            <div class="summ-item" title="Сколько раз цена закрылась в нашу сторону от цены входа (даже если вышли по стопу)">
+            <div class="summ-item">
                 <span class="lbl">Точность направления</span>
                 <span class="val ${s.direction_accuracy_pct === null ? '' : (s.direction_accuracy_pct >= 55 ? 'green' : (s.direction_accuracy_pct <= 45 ? 'red' : 'amber'))}">${s.direction_accuracy_pct === null ? '—' : s.direction_accuracy_pct + '%'}</span>
-                <span class="sub">верных: ${s.correct_direction_trades ?? 0}/${s.trades}</span>
             </div>
             <div class="summ-item">
-                <span class="lbl">Лучшая сделка</span>
-                <span class="val green">${fmtPct(s.best_trade_pct)}</span>
-            </div>
-            <div class="summ-item">
-                <span class="lbl">Худшая сделка</span>
-                <span class="val red">${fmtPct(s.worst_trade_pct)}</span>
+                <span class="lbl">Лучшая / худшая</span>
+                <span class="val" style="font-size:15px;line-height:1.4">
+                    <span class="green">${fmtPct(s.best_trade_pct)}</span> /
+                    <span class="red">${fmtPct(s.worst_trade_pct)}</span>
+                </span>
             </div>
             ${s.exits ? `
-            <div class="summ-item" title="Из скольких сделок цена дошла до цели / стопа / вышла по close">
+            <div class="summ-item" title="Причины закрытия позиций">
                 <span class="lbl">Причины выхода</span>
-                <span class="val" style="font-size:15px;line-height:1.4">
-                    <span class="green">🎯 ${s.exits.target}</span> /
-                    <span class="red">🛑 ${s.exits.stop}</span> /
-                    <span style="color:#64748b">⏱ ${s.exits.close}</span>
+                <span class="val" style="font-size:14px;line-height:1.4">
+                    <span style="color:#d97706">🎯 ${s.exits.trailing}</span> /
+                    <span style="color:#1e40af">🔄 ${s.exits.signal_flip}</span> /
+                    <span style="color:#374151">⏱ ${s.exits.time_limit}</span>
                 </span>
                 <span class="sub">
-                    цель ${s.exits.target_rate_pct ?? 0}% ·
-                    стоп ${s.exits.stop_rate_pct ?? 0}% ·
-                    close ${s.exits.close_rate_pct ?? 0}%
+                    trail ${s.exits.trailing} · flip ${s.exits.signal_flip} · limit ${s.exits.time_limit}
+                    ${s.exits.unresolved ? '· open ' + s.exits.unresolved : ''}
                 </span>
             </div>` : ''}
         </div>`;
@@ -348,7 +393,6 @@
         const padX = 40, padY = 20;
         const plotW = w - padX * 2, plotH = h - padY * 2;
 
-        // Baseline (initial deposit)
         const baselineY = padY + plotH * (1 - (initial - yMin) / (yMax - yMin));
         ctx.strokeStyle = '#cbd5e1';
         ctx.setLineDash([4, 4]);
@@ -361,7 +405,6 @@
         ctx.font = '11px sans-serif';
         ctx.fillText('Начальный депозит', padX + 4, baselineY - 4);
 
-        // Equity curve
         const finalEq = equities[equities.length - 1];
         const color = finalEq >= initial ? '#10b981' : '#ef4444';
         ctx.strokeStyle = color;
@@ -375,14 +418,12 @@
         });
         ctx.stroke();
 
-        // Fill area
         ctx.lineTo(w - padX, h - padY);
         ctx.lineTo(padX, h - padY);
         ctx.closePath();
         ctx.fillStyle = color + '15';
         ctx.fill();
 
-        // Labels first/last dates
         ctx.fillStyle = '#64748b';
         ctx.font = '11px sans-serif';
         ctx.fillText(curve[0].date, padX, h - 4);
@@ -399,7 +440,8 @@
         }
         let html = '<div class="trades-card"><h3>📊 По тикерам</h3><table class="x-table"><thead><tr>'
             + '<th>Тикер</th><th class="right">Сделок</th><th class="right">Win Rate</th>'
-            + '<th class="right" title="Цена закрылась в нашу сторону от входа">Направление</th>'
+            + '<th class="right">Направление</th>'
+            + '<th class="right">Ср. срок</th>'
             + '<th class="right">Средняя доходность</th><th class="right">P&L, ₽</th></tr></thead><tbody>';
         for (const [ticker, st] of Object.entries(byTicker)) {
             const wrCls = st.win_rate_pct >= 55 ? 'text-success' : (st.win_rate_pct <= 45 ? 'text-danger' : '');
@@ -410,6 +452,7 @@
                 <td class="right">${st.trades}</td>
                 <td class="right ${wrCls}">${st.win_rate_pct === null ? '—' : st.win_rate_pct + '%'}</td>
                 <td class="right ${dirCls}">${st.direction_accuracy_pct === null ? '—' : st.direction_accuracy_pct + '%'}</td>
+                <td class="right text-mute">${st.avg_holding_days ?? '—'} дн.</td>
                 <td class="right ${st.avg_return_pct >= 0 ? 'text-success' : 'text-danger'}">${fmtPct(st.avg_return_pct)}</td>
                 <td class="right ${pnlCls}">${fmtRub(st.pnl_rub)}</td>
             </tr>`;
@@ -425,43 +468,36 @@
             return;
         }
         let html = '<table class="x-table"><thead><tr>'
-            + '<th>Дата</th><th>Тикер</th><th>Вердикт</th>'
-            + '<th class="center" title="Уверенность LLM: 3 точки = высокая, 2 = средняя, 1 = низкая">Уверенность</th>'
-            + '<th class="right">Вход</th><th class="right">Выход</th><th>Причина</th>'
-            + '<th class="right" title="Цена закрылась в нашу сторону от входа">Направление</th>'
-            + '<th class="right">Доход %</th><th class="right">P&L, ₽</th>'
-            + '<th class="right">Капитал в сделке</th></tr></thead><tbody>';
-        const confidenceBadge = (c) => {
-            const val = (c || '').toLowerCase();
-            const filled = val === 'высокая' ? 3 : val === 'средняя' ? 2 : val === 'низкая' ? 1 : 0;
-            if (filled === 0) return '<span class="text-mute" title="нет данных">—</span>';
-            const color = filled === 3 ? '#059669' : filled === 2 ? '#d97706' : '#94a3b8';
-            const dots = '●'.repeat(filled) + '<span style="color:#e2e8f0">' + '●'.repeat(3-filled) + '</span>';
-            return `<span title="${c}" style="color:${color}; font-size:14px; letter-spacing:2px;">${dots}</span>`;
+            + '<th>Открыта</th><th>Закрыта</th><th>Тикер</th><th>Дир.</th>'
+            + '<th class="right">Вход</th><th class="right">Выход</th>'
+            + '<th class="center">Дней</th>'
+            + '<th>Причина</th>'
+            + '<th class="right">Направление</th>'
+            + '<th class="right">Доход %</th><th class="right">P&L, ₽</th></tr></thead><tbody>';
+        const exitLabels = {
+            'trailing': '🎯 trail',
+            'signal_flip': '🔄 flip',
+            'time_limit': '⏱ limit',
+            'unresolved': '⌛ open',
         };
-        // показываем последние 100 сделок в обратном порядке (свежие сверху)
         for (const t of trades.slice().reverse().slice(0, 100)) {
             const vCls = t.verdict === 'BUY' ? 'verdict-buy' : 'verdict-sell';
             const pnlCls = t.pnl_rub > 0 ? 'text-success' : (t.pnl_rub < 0 ? 'text-danger' : '');
-            const exitLabels = {
-                'target': '🎯 цель',
-                'stop': '🛑 стоп',
-                'close': 'close',
-            };
             const dirLabel = t.correct_direction === true ? '<span class="text-success">✓</span>'
                            : t.correct_direction === false ? '<span class="text-danger">✗</span>' : '—';
+            const exitCls = 'exit-' + t.exit_reason;
             html += `<tr>
+                <td><span class="text-mute">${t.opened_date || t.date}</span></td>
                 <td><span class="text-mute">${t.date}</span></td>
                 <td><b>${t.ticker}</b></td>
                 <td><span class="verdict-pill ${vCls}">${t.verdict}</span></td>
-                <td class="center">${confidenceBadge(t.confidence)}</td>
                 <td class="right">${t.entry_price.toFixed(2)}</td>
                 <td class="right">${t.exit_price.toFixed(2)}</td>
-                <td><span class="exit-reason">${exitLabels[t.exit_reason] || t.exit_reason}</span></td>
+                <td class="center"><b>${t.days_held}</b></td>
+                <td><span class="exit-reason ${exitCls}">${exitLabels[t.exit_reason] || t.exit_reason}</span></td>
                 <td class="right">${dirLabel}</td>
                 <td class="right ${t.net_return_pct >= 0 ? 'text-success' : 'text-danger'}">${fmtPct(t.net_return_pct)}</td>
                 <td class="right ${pnlCls}">${fmtRub(t.pnl_rub)}</td>
-                <td class="right text-mute">${t.capital_at_trade.toLocaleString('ru-RU', {maximumFractionDigits:0})} ₽</td>
             </tr>`;
         }
         html += '</tbody></table>';
@@ -473,13 +509,7 @@
         wrap.innerHTML = html;
     }
 
-    // Стартуем сразу
     runSimulation();
-    window.addEventListener('resize', () => {
-        // Перерисуем equity на ресайз
-        fetch(`/api/portfolio?initial=${document.getElementById('initial').value || 100000}`)
-            .then(r => r.json()).then(d => renderEquity(d.equity_curve, d.summary));
-    });
     </script>
 </body>
 </html>

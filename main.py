@@ -41,6 +41,7 @@ from services.ta_indicators import compute_ta_indicators
 from services.news_service import fetch_news_for_ticker
 from services.performance_tracker import compute_recent_hit_rates
 from services.portfolio_simulator import simulate as simulate_portfolio
+from services.portfolio_simulator_pro import simulate_pro as simulate_portfolio_pro
 
 load_dotenv()
 logging.basicConfig(level=logging.INFO,
@@ -441,6 +442,49 @@ async def portfolio_page(request: Request):
     return templates.TemplateResponse(
         request=request,
         name="portfolio.html",
+        context={
+            "current_user": current_user,
+            "streamlit_url": STREAMLIT_URL,
+        },
+    )
+
+
+@app.get("/api/portfolio/pro", tags=["Stats"])
+@limiter.limit("60/hour")
+async def portfolio_simulation_pro(request: Request,
+                                    initial: float = 100_000.0,
+                                    commission: float = 0.05,
+                                    min_confidence: str = "средняя",
+                                    max_hold_days: int = 5,
+                                    atr_mult_stop: float = 1.0,
+                                    atr_mult_trail: float = 1.0):
+    """
+    PRO симуляция: continuation strategy с ATR trailing stop.
+    Держит позиции до max_hold_days дней, выходит по trailing stop /
+    signal flip / time limit.
+    """
+    result = await asyncio.to_thread(
+        simulate_portfolio_pro,
+        engine,
+        initial_capital=initial,
+        commission_pct=commission,
+        min_confidence=min_confidence,
+        max_hold_days=max_hold_days,
+        atr_mult_stop=atr_mult_stop,
+        atr_mult_trail=atr_mult_trail,
+    )
+    return result
+
+
+@app.get("/portfolio/pro", response_class=HTMLResponse, tags=["Pages"])
+async def portfolio_pro_page(request: Request):
+    """PRO стратегия — continuation + ATR trailing stop."""
+    current_user, redirect = _require_login(request)
+    if redirect:
+        return redirect
+    return templates.TemplateResponse(
+        request=request,
+        name="portfolio_pro.html",
         context={
             "current_user": current_user,
             "streamlit_url": STREAMLIT_URL,
