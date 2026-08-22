@@ -167,6 +167,7 @@
             color: var(--text-muted);
             background: var(--surface-alt);
         }
+        .exit-stop_initial { background: #fee2e2; color: #991b1b; }
         .exit-trailing { background: #fef3c7; color: #92400e; }
         .exit-signal_flip { background: #dbeafe; color: #1e40af; }
         .exit-time_limit { background: #e5e7eb; color: #374151; }
@@ -250,12 +251,12 @@
         </div>
 
         <div class="strategy-desc">
-            <b>Стратегия:</b> позиция открывается при вердикте BUY/SELL с фильтром по уверенности.
-            Стоп-лосс адаптивный — <b>1×ATR14</b> от цены входа.
-            Каждый день <b>trailing stop</b> подтягивается к текущему экстремуму цены (только вверх для BUY, только вниз для SELL).
-            Позиция закрывается по: <b>trailing stop</b> (цена откатилась), <b>signal flip</b>
-            (вердикт сменился на противоположный), или <b>time limit</b> (превышен лимит дней).
-            Держим тренды дольше — не выходим каждый день по close.
+            <b>Стратегия breakeven-lock:</b> позиция открывается при вердикте BUY/SELL с фильтром по уверенности.
+            <b>Initial stop</b> (защитный) = 2×ATR14 от entry — работает всегда.
+            <b>Trailing stop</b> активируется <b>только когда прибыль ≥ 1×ATR</b> — до этого позицию не выбивает
+            рыночным шумом. После активации trail = extreme − 1.5×ATR (только в благоприятную сторону).
+            Выходы: <b>initial stop</b> (защита от катастрофы), <b>trailing</b> (защита прибыли),
+            <b>signal flip</b> (вердикт сменился), <b>time limit</b> (лимит дней).
         </div>
 
         <div class="controls">
@@ -279,13 +280,17 @@
                 Макс. дней держания
                 <input type="number" id="max-hold" value="5" min="1" max="30" step="1">
             </label>
-            <label title="Множитель ATR14 для initial stop-loss">
+            <label title="Множитель ATR14 для initial (защитного) stop-loss">
                 Initial stop × ATR
-                <input type="number" id="atr-stop" value="1.5" min="0.3" max="3.0" step="0.1">
+                <input type="number" id="atr-stop" value="2.0" min="0.3" max="5.0" step="0.1">
             </label>
-            <label title="Множитель ATR14 для trailing stop">
+            <label title="Множитель ATR14 для trailing stop (после активации)">
                 Trail stop × ATR
-                <input type="number" id="atr-trail" value="2.0" min="0.3" max="3.0" step="0.1">
+                <input type="number" id="atr-trail" value="1.5" min="0.3" max="5.0" step="0.1">
+            </label>
+            <label title="Trailing активируется когда прибыль достигнет этого × ATR. 0 = сразу.">
+                Trail активация × ATR
+                <input type="number" id="atr-activation" value="1.0" min="0.0" max="3.0" step="0.1">
             </label>
             <button id="simulate-btn" onclick="runSimulation()">Пересчитать</button>
         </div>
@@ -347,8 +352,9 @@
             commission: parseFloat(document.getElementById('commission').value) || 0,
             min_confidence: document.getElementById('min-confidence').value,
             max_hold_days: parseInt(document.getElementById('max-hold').value) || 5,
-            atr_mult_stop: parseFloat(document.getElementById('atr-stop').value) || 1.5,
-            atr_mult_trail: parseFloat(document.getElementById('atr-trail').value) || 2.0,
+            atr_mult_stop: parseFloat(document.getElementById('atr-stop').value) || 2.0,
+            atr_mult_trail: parseFloat(document.getElementById('atr-trail').value) || 1.5,
+            atr_trail_activation: parseFloat(document.getElementById('atr-activation').value) || 0,
             exclude_tickers: excluded.join(','),
         });
         try {
@@ -449,13 +455,14 @@
             ${s.exits ? `
             <div class="summ-item" title="Причины закрытия позиций">
                 <span class="lbl">Причины выхода</span>
-                <span class="val" style="font-size:14px;line-height:1.4">
+                <span class="val" style="font-size:13px;line-height:1.4">
+                    <span style="color:#dc2626">🛑 ${s.exits.stop_initial || 0}</span> /
                     <span style="color:#d97706">🎯 ${s.exits.trailing}</span> /
                     <span style="color:#1e40af">🔄 ${s.exits.signal_flip}</span> /
                     <span style="color:#374151">⏱ ${s.exits.time_limit}</span>
                 </span>
                 <span class="sub">
-                    trail ${s.exits.trailing} · flip ${s.exits.signal_flip} · limit ${s.exits.time_limit}
+                    initial ${s.exits.stop_initial || 0} · trail ${s.exits.trailing} · flip ${s.exits.signal_flip} · limit ${s.exits.time_limit}
                     ${s.exits.unresolved ? '· open ' + s.exits.unresolved : ''}
                 </span>
             </div>` : ''}
@@ -581,6 +588,7 @@
             + '<th class="right">Направление</th>'
             + '<th class="right">Доход %</th><th class="right">P&L, ₽</th></tr></thead><tbody>';
         const exitLabels = {
+            'stop_initial': '🛑 initial',
             'trailing': '🎯 trail',
             'signal_flip': '🔄 flip',
             'time_limit': '⏱ limit',

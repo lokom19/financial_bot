@@ -83,19 +83,23 @@ def simulate_pro(engine, initial_capital: float = 100_000.0,
                  commission_pct: float = DEFAULT_COMMISSION_PCT,
                  min_confidence: str = "средняя",
                  max_hold_days: int = 5,
-                 atr_mult_stop: float = 1.5,
-                 atr_mult_trail: float = 2.0,
+                 atr_mult_stop: float = 2.0,
+                 atr_mult_trail: float = 1.5,
+                 atr_trail_activation: float = 1.0,
                  exclude_tickers: Optional[set] = None) -> dict:
     """
-    Симуляция PRO-стратегии по всем ticker_reports.
+    Симуляция PRO-стратегии с breakeven-lock trailing stop.
 
     Args:
         initial_capital: стартовый депозит
         commission_pct: комиссия в одну сторону (%)
         min_confidence: минимум "низкая" / "средняя" / "высокая"
         max_hold_days: максимум дней держания позиции
-        atr_mult_stop: множитель ATR для initial stop (default 1.5)
-        atr_mult_trail: множитель ATR для trailing stop (default 2.0)
+        atr_mult_stop: множитель ATR для initial (защитный) stop
+        atr_mult_trail: множитель ATR для trailing stop (после активации)
+        atr_trail_activation: активировать trailing только когда прибыль
+                              достигла N × ATR. До этого работает только initial.
+                              0 = trailing активен сразу (старое поведение).
         exclude_tickers: множество тикеров для исключения из торговли
     """
     exclude_tickers = exclude_tickers or set()
@@ -194,12 +198,20 @@ def simulate_pro(engine, initial_capital: float = 100_000.0,
             # обновляем экстремум
             if pos["direction"] == "BUY":
                 pos["extreme"] = max(pos["extreme"], high)
-                new_stop = pos["extreme"] - atr_mult_trail * atr
-                pos["stop"] = max(pos["stop"], new_stop)
-            else:
+                # Прибыль в единицах ATR (положительная = позиция ушла в плюс)
+                profit_in_atr = (pos["extreme"] - pos["entry"]) / atr if atr > 0 else 0
+                # Trailing активируется ТОЛЬКО когда прибыль >= порога
+                if profit_in_atr >= atr_trail_activation:
+                    pos["trailing_active"] = True
+                    new_stop = pos["extreme"] - atr_mult_trail * atr
+                    pos["stop"] = max(pos["stop"], new_stop)
+            else:  # SELL
                 pos["extreme"] = min(pos["extreme"], low)
-                new_stop = pos["extreme"] + atr_mult_trail * atr
-                pos["stop"] = min(pos["stop"], new_stop)
+                profit_in_atr = (pos["entry"] - pos["extreme"]) / atr if atr > 0 else 0
+                if profit_in_atr >= atr_trail_activation:
+                    pos["trailing_active"] = True
+                    new_stop = pos["extreme"] + atr_mult_trail * atr
+                    pos["stop"] = min(pos["stop"], new_stop)
 
             pos["days_held"] += 1
 
@@ -207,11 +219,12 @@ def simulate_pro(engine, initial_capital: float = 100_000.0,
             exit_price = None
             exit_reason = None
 
-            # 1) trailing stop
-            if pos["direction"] == "BUY" and low <= pos["stop"]:
-                exit_price, exit_reason = pos["stop"], "trailing"
-            elif pos["direction"] == "SELL" and high >= pos["stop"]:
-                exit_price, exit_reason = pos["stop"], "trailing"
+            # 1) stop hit — различаем trailing (активирован) vs initial (защитный)
+            stop_hit = (pos["direction"] == "BUY" and low <= pos["stop"]) or \
+                       (pos["direction"] == "SELL" and high >= pos["stop"])
+            if stop_hit:
+                exit_price = pos["stop"]
+                exit_reason = "trailing" if pos.get("trailing_active") else "stop_initial"
 
             # 2) signal flip (только если сегодня есть новый вердикт)
             if exit_price is None:
@@ -330,6 +343,7 @@ def simulate_pro(engine, initial_capital: float = 100_000.0,
                     "capital": per_slot,
                     "opened_date": day,
                     "days_held": 0,
+                    "trailing_active": False,
                 }
 
         equity_curve.append({
@@ -401,6 +415,7 @@ def simulate_pro(engine, initial_capital: float = 100_000.0,
         "avg_holding_days": round(avg_hold, 1) if avg_hold else None,
         "days_simulated": len(equity_curve),
         "exits": {
+            "stop_initial": exits_count["stop_initial"],
             "trailing": exits_count["trailing"],
             "signal_flip": exits_count["signal_flip"],
             "time_limit": exits_count["time_limit"],

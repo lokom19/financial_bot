@@ -456,15 +456,14 @@ async def portfolio_simulation_pro(request: Request,
                                     commission: float = 0.05,
                                     min_confidence: str = "средняя",
                                     max_hold_days: int = 5,
-                                    atr_mult_stop: float = 1.5,
-                                    atr_mult_trail: float = 2.0,
+                                    atr_mult_stop: float = 2.0,
+                                    atr_mult_trail: float = 1.5,
+                                    atr_trail_activation: float = 1.0,
                                     exclude_tickers: str = "SBER,GAZP"):
     """
-    PRO симуляция: continuation strategy с ATR trailing stop.
-    Держит позиции до max_hold_days дней, выходит по trailing stop /
-    signal flip / time limit.
-
-    exclude_tickers: список тикеров для исключения через запятую (например, "SBER,GAZP")
+    PRO симуляция: breakeven-lock trailing stop strategy.
+    Initial stop защищает от катастрофы; trailing активируется только
+    когда позиция ушла в прибыль >= atr_trail_activation × ATR.
     """
     exclude_set = {t.strip().upper() for t in exclude_tickers.split(",") if t.strip()}
     result = await asyncio.to_thread(
@@ -476,6 +475,7 @@ async def portfolio_simulation_pro(request: Request,
         max_hold_days=max_hold_days,
         atr_mult_stop=atr_mult_stop,
         atr_mult_trail=atr_mult_trail,
+        atr_trail_activation=atr_trail_activation,
         exclude_tickers=exclude_set,
     )
     return result
